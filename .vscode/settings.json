@@ -1,0 +1,28 @@
+{
+    "cSpell.words": [
+        "Clixml",
+        "Hashtable",
+        "HKCC",
+        "HKCR",
+        "HKCU",
+        "HKEY",
+        "HKLM",
+        "LASTEXITCODE",
+        "maxpwage",
+        "Mbps",
+        "minpwage",
+        "netsh",
+        "nettop",
+        "ninjarmm",
+        "notcontains",
+        "notlike",
+        "Passthru",
+        "RSAT"
+    ],
+    "powershell.codeFormatting.pipelineIndentationStyle": "IncreaseIndentationForFirstPipeline",
+    "powershell.codeFormatting.trimWhitespaceAroundPipe": true,
+    "powershell.codeFormatting.useCorrectCasing": true,
+    "powershell.codeFormatting.whitespaceBetweenParameters": true,
+    "powershell.scriptAnalysis.settingsPath": ".vscode\\PSScriptAnalyzerSettings.psd1",
+    "files.trimTrailingWhitespace": true
+}
