@@ -1,4 +1,4 @@
-<#
+﻿<#
    .SYNOPSIS
    This script will enable outlook signatures and attempt to restore archived ones for all users
    .DESCRIPTION
@@ -23,7 +23,7 @@ $archivedSignatures | ForEach-Object {
             $destination = ($_.FullName).SubString(0, $($_.FullName).Length - 4)
 
             # Outlook should create this folder automagically but it does this when it needs it not immediately
-            if (!(test-path -Path $destination)) { 
+            if (!(Test-Path -Path $destination)) {
                 New-Item -Path $destination -ItemType Directory | Out-Null
             }
             try {
@@ -31,20 +31,17 @@ $archivedSignatures | ForEach-Object {
                 $archive = $_.FullName
                 Move-Item $archive\* -Destination $destination
                 Write-Output "Successfully restored signatures in $($_.FullName)"
-                if(!(Test-Path $archive\*)){
+                if (!(Test-Path $archive\*)) {
                     Remove-Item -Path $archive
                     Write-Output "Removed archive in $($_.FullName)"
                 }
-            }
-            catch {
+            } catch {
                 Write-Error "[Error] Unable to move archived signatures in $($_.FullName)"
             }
-        }
-        else {
+        } else {
             Write-Verbose "Archive Folder is empty moving on..."
-        }     
-    }
-    else {
+        }
+    } else {
         Write-Verbose "No Archive Signature's detected"
     }
 }
@@ -53,22 +50,22 @@ $archivedSignatures | ForEach-Object {
 try {
     # Regex pattern for SIDs
     $PatternSID = 'S-1-5-((32-\d*)|(21-\d*-\d*-\d*-\d*))'
-        
+
     New-PSDrive -PSProvider Registry -Name HKU -Root HKEY_USERS | Out-Null
     # Get Username, SID, and location of ntuser.dat for all users
-    $ProfileList = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\*' | 
-    Where-Object { $_.PSChildName -match $PatternSID } | 
-    Select-Object  @{name = "SID"; expression = { $_.PSChildName } }, 
-    @{name = "UserHive"; expression = { "$($_.ProfileImagePath)\ntuser.dat" } }, 
-    @{name = "Username"; expression = { $_.ProfileImagePath -replace '^(.*[\\\/])', '' } }
-      
+    $ProfileList = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\*' |
+        Where-Object { $_.PSChildName -match $PatternSID } |
+        Select-Object @{name = "SID"; expression = { $_.PSChildName } },
+        @{name = "UserHive"; expression = { "$($_.ProfileImagePath)\ntuser.dat" } },
+        @{name = "Username"; expression = { $_.ProfileImagePath -replace '^(.*[\\\/])', '' } }
+
     # Get all user SIDs found in HKEY_USERS (ntuder.dat files that are loaded)
     $LoadedHives = Get-ChildItem Registry::HKEY_USERS | Where-Object { $_.PSChildname -match $PatternSID } |
-    Select-Object @{name = "SID"; expression = { $_.PSChildName } }
-      
+        Select-Object @{name = "SID"; expression = { $_.PSChildName } }
+
     # Get all users that are not currently logged
     $UnloadedHives = Compare-Object -ReferenceObject @($LoadedHives | Select-Object) -DifferenceObject @($ProfileList | Select-Object) | Select-Object @{name = "SID"; expression = { $_.InputObject } }, UserHive, Username
-     
+
     $ProfileList | ForEach-Object {
         if ($_.SID -in $UnloadedHives.SID) {
             reg load HKU\$($_.SID) $($_.UserHive) | Out-Null
@@ -79,29 +76,25 @@ try {
             if (!(Test-Path "HKU:\$($_.SID)\SOFTWARE\Microsoft\Office\16.0\Common\MailSettings")) {
                 New-Item -Path "HKU:\$($_.SID)\SOFTWARE\Microsoft\Office\16.0\Common\MailSettings" -Force -EA Stop | Out-Null
             }
-        }catch {
+        } catch {
             Write-Error "[Error] Unable to set regkey for $($_.Username)"
         }
-        
 
         # Disable Outlook Signatures
-        try{
+        try {
             New-ItemProperty -Path "HKU:\$($_.SID)\SOFTWARE\Microsoft\Office\16.0\Common\MailSettings" -Name "DisableSignatures" -Value "0" -Type DWORD -Force -EA Stop | Out-Null
             Write-Output "Signature unblocked for $($_.Username)"
-        }catch{
+        } catch {
             Write-Error "Cannot unblock signature for $($_.Username)"
         }
-        
-        
-           
-        # Unload ntuser.dat        
+
+        # Unload ntuser.dat
         if ($_.SID -in $UnloadedHives.SID) {
             ### Garbage collection and closing of ntuser.dat ###
             [gc]::Collect()
             reg unload HKU\$($_.SID) | Out-Null
         }
     }
-}
-catch {
+} catch {
     Write-Error "[Error] Unable to unblock signatures!"
 }

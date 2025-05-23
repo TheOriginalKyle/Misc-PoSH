@@ -1,4 +1,4 @@
-<#
+﻿<#
  .DESCRIPTION
     This will grab the most relevant details of an AD Connect Config and add it to an excel spreadsheet.
 
@@ -25,16 +25,16 @@ $InclusionList = $AADConPartition.ConnectorPartitionScope.ContainerInclusionList
 # Checks if all ou's are synced if they are its not really ou synced.
 if ($ADdomain -eq $InclusionList) {
     $OUSynced = $false
-}else {
+} else {
     $OUSynced = $true
 }
 
 # Grab synced groups name
-$GroupFilteringDN = (Get-ADSyncConnector).GlobalParameters | Where-Object Name -eq Connector.GroupFilteringGroupDn
+$GroupFilteringDN = (Get-ADSyncConnector).GlobalParameters | Where-Object Name -EQ Connector.GroupFilteringGroupDn
 
 if (($GroupFilteringDN.Value) -ne "") {
     $GroupFiltered = $true
-}else {
+} else {
     $GroupFiltered = $false
 }
 
@@ -52,7 +52,6 @@ try {
     Write-Output "Attempting to send data to flow"
     Invoke-RestMethod -Method Post -Uri $FlowUri -Body (ConvertTo-Json $flowBody) -ContentType "application/json" -ErrorVariable flowError
     Write-Output "Sent to Flow"
-}
-catch {
+} catch {
     throw "[ERROR] Could not send update to Flow`n`n" + $flowError
 }

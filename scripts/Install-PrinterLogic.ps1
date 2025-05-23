@@ -1,5 +1,5 @@
-param ($AuthCode, $PL_HOME_URL)
-    
+﻿param ($AuthCode, $PL_HOME_URL)
+
 $MSI_Name = "PrinterInstallerClient.msi"
 $WorkingDir = "C:\Working\PrinterLogic"
 $DL_URL = $PL_HOME_URL + "/client/setup/" + $MSI_Name
@@ -13,25 +13,22 @@ $MSI_Arguments = @(
     ("/l*v " + $MSI_Log)
 )
 $SoftwareName = "Printer Installer Client"
-    
-if(!(Test-Path -Path $WorkingDir))
-{
-    New-Item -ItemType directory -path $WorkingDir | Out-Null
+
+if (!(Test-Path -Path $WorkingDir)) {
+    New-Item -ItemType directory -Path $WorkingDir | Out-Null
 }
 
 Start-BitsTransfer $DL_URL $MSI_Location
 
-if(!(Test-Path -Path $MSI_Location))
-{
+if (!(Test-Path -Path $MSI_Location)) {
     Write-Host "Download has failed"
 }
 
 Start-Process msiexec.exe -Wait -ArgumentList $MSI_Arguments
 
-if(!(Get-CimInstance Win32_Product | Where-Object Name -eq $SoftwareName))
-{
+if (!(Get-CimInstance Win32_Product | Where-Object Name -EQ $SoftwareName)) {
     Write-Host "Install Failed"
-}else{
+} else {
     Remove-Item $MSI_Log | Out-Null
     Remove-Item $MSI_Location | Out-Null
     Remove-Item $WorkingDir | Out-Null
