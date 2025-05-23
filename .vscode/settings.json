@@ -23,6 +23,11 @@
     "powershell.codeFormatting.trimWhitespaceAroundPipe": true,
     "powershell.codeFormatting.useCorrectCasing": true,
     "powershell.codeFormatting.whitespaceBetweenParameters": true,
+    "powershell.codeFormatting.preset": "OTBS",
     "powershell.scriptAnalysis.settingsPath": ".vscode\\PSScriptAnalyzerSettings.psd1",
+    "powershell.powerShellAdditionalExePaths": {
+        "PowerShell 5.1": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+    },
+    "files.encoding": "utf8bom",
     "files.trimTrailingWhitespace": true
 }

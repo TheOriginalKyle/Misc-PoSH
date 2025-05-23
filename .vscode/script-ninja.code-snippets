@@ -1,9 +1,9 @@
 {
-    // Place your client_scripts workspace snippets here. Each snippet is defined under a snippet name and has a scope, prefix, body and 
-    // description. Add comma separated ids of the languages where the snippet is applicable in the scope field. If scope 
-    // is left empty or omitted, the snippet gets applied to all languages. The prefix is what is 
-    // used to trigger the snippet and the body will be expanded and inserted. Possible variables are: 
-    // $1, $2 for tab stops, $0 for the final cursor position, and ${1:label}, ${2:another} for placeholders. 
+    // Place your client_scripts workspace snippets here. Each snippet is defined under a snippet name and has a scope, prefix, body and
+    // description. Add comma separated ids of the languages where the snippet is applicable in the scope field. If scope
+    // is left empty or omitted, the snippet gets applied to all languages. The prefix is what is
+    // used to trigger the snippet and the body will be expanded and inserted. Possible variables are:
+    // $1, $2 for tab stops, $0 for the final cursor position, and ${1:label}, ${2:another} for placeholders.
     // Placeholders with the same ids are connected.
     // Example:
     // "Print to console": {
@@ -88,22 +88,6 @@
             "\t}",
             "}",
             "end {",
-            "\t$$ScriptName = \"Example Name\"",
-            "\t$$ScriptVariables =@(",
-            "\t\t[PSCustomObject]@{",
-            "\t\t\tname           = \"Some Param\"",
-            "\t\t\tcalculatedName = \"someParam\"",
-            "\t\t\trequired       = $$false",
-            "\t\t\tdefaultValue   = $$null",
-            "\t\t\ttype           = \"TEXT\"",
-            "\t\t\tvalueList      = $$null",
-            "\t\t\tdescription    = \"REPLACE ME WITH STUFF\"",
-            "\t\t}",
-            "\t)",
-            "\t$$MetaData = [PSCustomObject]@{",
-            "\t\t\"isUpdate\" = \"\"",
-            "\t\t\"releaseTicket\" = \"NJ-12345\"",
-            "\t}",
             "}"
         ],
         "description": "Template Script for this repo"
@@ -111,44 +95,6 @@
     "Script Tests Template": {
         "scope": "powershell",
         "prefix": "stt",
-        "body": [
-            "Describe \"Catagory\" {",
-            "\tContext \"$($$PSCommandPath -Replace '.tests.', '.')\" {",
-            "\t\tBeforeAll {",
-            "\t\t\t# Create mock cmdlets, so we don't change the local computer's registry",
-            "\t\t\tif ((Get-Command my.exe -ErrorAction SilentlyContinue).Count -eq 0) {",
-            "\t\t\t\tfunction my.exe () {}",
-            "\t\t\t}",
-            "\t\t\tif ((Get-Command Get-MyFunction -ErrorAction SilentlyContinue).Count -eq 0) {",
-            "\t\t\t\tfunction Get-MyFunction () {}",
-            "\t\t\t}",
-            "\t\t\t",
-            "\t\t\tMock My.exe {}",
-            "\t\t\tMock Get-MyFunction {}",
-            "\t\t}",
-            "\t\t",
-            "\t\tIt \"Check Script Output\" {",
-            "\t\t\t",
-            "\t\t\t# Get script path",
-            "\t\t\t$$Path = \".\\src\\\\$($$PSCommandPath | Split-Path -Leaf)\" -Replace '.tests.', '.'",
-            "\t\t\t# Test that the script exists",
-            "\t\t\tTest-Path -Path $$Path | Should -BeTrue",
-            "\t\t\t# Run script and save standard output to $$Results",
-            "\t\t\t$$Results = . $$Path -Param1 \"Something\"",
-            "\t\t\t# Test what Mocked functions have be used and howmany times it should have been used",
-            "\t\t\tShould -Invoke my.exe -Times 1 -Exactly",
-            "\t\t\tShould -Invoke Get-MyFunction -Times 1 -Exactly",
-            "\t\t\t# Test what should be in or not in the results",
-            "\t\t\t$$Results | Should -BeNullOrEmpty",
-            "\t\t}",
-            "\t}",
-            "}"
-        ],
-        "description": "Template Test Script for this repo"
-    },
-    "Script Tests Template - Kyle": {
-        "scope": "powershell",
-        "prefix": "sttk",
         "body": [
             "BeforeAll {",
             "\t# Get script path",
@@ -190,87 +136,6 @@
         "prefix": "glst",
         "body": [
             "New-Object System.Collections.Generic.List[object]"
-        ]
-    },
-    "Set-ItemProp Function": {
-        "scope": "powershell",
-        "prefix": "sip",
-        "body": [
-            "function Set-ItemProp {",
-            "\tparam (",
-            "\t\t$$Path,",
-            "\t\t$$Name,",
-            "\t\t$$Value,",
-            "\t\t[ValidateSet(\"DWord\", \"QWord\", \"String\", \"ExpandedString\", \"Binary\", \"MultiString\", \"Unknown\")]",
-            "\t\t$$PropertyType = \"DWord\"",
-            "\t)",
-            "\t# Do not output errors and continue",
-            "\t$$ErrorActionPreference = [System.Management.Automation.ActionPreference]::SilentlyContinue",
-            "\tif (-not $(Test-Path -Path $$Path)) {",
-            "\t\t# Check if path does not exist and create the path",
-            "\t\tNew-Item -Path $$Path -Force | Out-Null",
-            "\t}",
-            "\tif ((Get-ItemProperty -Path $$Path -Name $$Name)) {",
-            "\t# Update property and print out what it was changed from and changed to",
-            "\t\t$$CurrentValue = Get-ItemProperty -Path $$Path -Name $$Name",
-            "\t\ttry {",
-            "\t\t\tSet-ItemProperty -Path $$Path -Name $$Name -Value $$Value -Force -Confirm:$$false -ErrorAction Stop | Out-Null",
-            "\t\t}",
-            "\t\tcatch {",
-            "\t\t\tWrite-Error $$_",
-            "\t\t}",
-            "\t\tWrite-Host \"$$Path\\\\$$Name changed from $$CurrentValue to $(Get-ItemProperty -Path $$Path -Name $$Name)\"",
-            "\t}",
-            "\telse {",
-            "\t\t# Create property with value",
-            "\t\ttry {",
-            "\t\t\tNew-ItemProperty -Path $$Path -Name $$Name -Value $$Value -PropertyType $$PropertyType -Force -Confirm:$$false -ErrorAction Stop | Out-Null",
-            "\t\t}",
-            "\t\tcatch {",
-            "\t\t\tWrite-Error $$_",
-            "\t\t}",
-            "\t\tWrite-Host \"Set $$Path\\$$Name to $(Get-ItemProperty -Path $$Path -Name $$Name)\"",
-            "\t}",
-            "\t$$ErrorActionPreference = [System.Management.Automation.ActionPreference]::Continue",
-            "}"
-        ]
-    },
-    "Is Workstation": {
-        "prefix": "isworkstation",
-        "scope": "powershell",
-        "body": "$$IsWorkstation = $(Get-CimInstance -ClassName Win32_OperatingSystem).ProductType -eq 1",
-    },
-    "List PSCustomObject": {
-        "prefix": "List",
-        "description": "Generic List for PSCustomObject",
-        "body": "$${1:List} = [System.Collections.Generic.List[PSCustomObject]]::new()"
-    },
-    "List Int64": {
-        "prefix": "List-Int64",
-        "description": "Generic List for Int64",
-        "body": "$${1:List} = [System.Collections.Generic.List[Int64]]::new()"
-    },
-    "List String": {
-        "prefix": "List-String",
-        "description": "Generic List for String",
-        "body": "$${1:List} = [System.Collections.Generic.List[String]]::new()"
-    },
-    "Script Variables PowerShell": {
-        "prefix": "Script-Var-Windows",
-        "description": "Script Variable for PowerShell",
-        "body": [
-            "$$ScriptVariables = @(",
-            "\t[PSCustomObject]@{",
-            "\t\tname           = \"$1\"",
-            "\t\tcalculatedName = \"$2\" # Must be lowercase and no spaces",
-            "\t\trequired       = $$false",
-            "\t\tdefaultValue = \"\"",
-            "\t\ttype = \"DROPDOWN\" # Must be uppercase!",
-            "\t\tvalueList = @( \"\" ) # Array of strings or $null",
-            "\t\t)",
-            "\t\tdescription = \"\"",
-            "\t}",
-            ")"
         ]
     },
     "Script Template Bash": {
@@ -353,31 +218,7 @@
             "if [[ \\$(id -u) -ne 0 ]]; then",
             "\t_PRINT_HELP=no die \"[Error] This script must be run with root permissions. Try running it with sudo or as the system/root user.\" 1",
             "fi",
-            "",
-            "ScriptName=\"Bash Script Name\"",
-            "Metadata='{\"isUpdate\": \"\",\"releaseTicket\": \"NJ-12345\"}'",
-            ": '",
-            "[",
-            "\t{",
-            "\t\t\"name\": \"Some Parameter\",",
-            "\t\t\"calculatedName\": \"someParameter\",",
-            "\t\t\"required\": true,",
-            "\t\t\"defaultValue\": 90,",
-            "\t\t\"type\": \"INTEGER\",",
-            "\t\t\"valueList\": null,",
-            "\t\t\"description\": \"REPLACE ME WITH DESCRIPTION\"",
-            "\t},",
-            "\t{",
-            "\t\t\"name\": \"Some Switch\",",
-            "\t\t\"calculatedName\": \"someSwitch\",",
-            "\t\t\"required\": false,",
-            "\t\t\"defaultValue\": false,",
-            "\t\t\"type\": \"CHECKBOX\",",
-            "\t\t\"valueList\": null,",
-            "\t\t\"description\": \"REPLACE ME WITH DESCRIPTION\"",
-            "\t}",
-            "]",
-            "'"
+            ""
         ]
     },
     "Shellspec Test Template Bash": {
@@ -415,26 +256,6 @@
             "\t\tThe result of function someFunction should include \"Success\"",
             "\tEnd",
             "End"
-        ]
-    },
-    "Script Variables Bash": {
-        "prefix": "Script-Var-Bash",
-        "description": "Script Variable for Bash",
-        "body": [
-            ": '",
-            "[",
-            "\t{",
-            "\t\t\"name\":  \"adsf\",",
-            "\t\t\"calculatedName\":  \"asdf\",",
-            "\t\t\"required\":  false,",
-            "\t\t\"defaultValue\":  \"\"",
-            "\t\t\"type\":  \"DROPDOWN\",",
-            "\t\t\"valueList\":  [\"\"]",
-            "\t\t],",
-            "\t\t\"description\":  \"\"",
-            "\t}",
-            "]",
-            "'"
         ]
     }
 }
