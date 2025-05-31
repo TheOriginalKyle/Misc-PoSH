@@ -1,5 +1,5 @@
 {
-    // Place your client_scripts workspace snippets here. Each snippet is defined under a snippet name and has a scope, prefix, body and
+    // Place your workspace snippets here. Each snippet is defined under a snippet name and has a scope, prefix, body and
     // description. Add comma separated ids of the languages where the snippet is applicable in the scope field. If scope
     // is left empty or omitted, the snippet gets applied to all languages. The prefix is what is
     // used to trigger the snippet and the body will be expanded and inserted. Possible variables are:
@@ -31,17 +31,12 @@
             "\t(No Parameters)",
             "\t## EXAMPLE OUTPUT WITHOUT PARAMS ##",
             "",
-            "PARAMETER: -SomeParam \"ExampleInput\"",
+            ".PARAMETER SomeParam",
             "\tA brief explanation of the parameter.",
-            ".EXAMPLE",
-            "\t-SomeParam \"ExampleInput\"",
-            "\t## EXAMPLE OUTPUT WITH SOMEPARAM ##",
             "",
-            "PARAMETER: -CustomFieldParam \"ReplaceMeWithAnyMultilineCustomField\"",
+            ".PARAMETER CustomFieldParam",
             "\tA brief explanation of the parameter.",
-            ".EXAMPLE",
-            "\t-CustomFieldParam \"ReplaceMeWithAnyMultilineCustomField\"",
-            "\t## EXAMPLE OUTPUT WITH CUSTOMFIELDPARAM ##",
+            "",
             ".NOTES",
             "\tMinimum OS Architecture Supported: Windows 10, Windows Server 2016",
             "\tRelease Notes: Initial Release",
@@ -86,8 +81,6 @@
             "\t\tWrite-Host -Object \"[Error] Access Denied: Please run with Administrator privileges.\"",
             "\t\texit 1",
             "\t}",
-            "}",
-            "end {",
             "}"
         ],
         "description": "Template Script for this repo"
