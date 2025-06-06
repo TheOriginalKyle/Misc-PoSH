@@ -26,24 +26,20 @@
         function Get-ADDomain () {}
     }
 
-    Mock Write-Host { $Object | ForEach-Object { Write-Verbose -Message $_ } }
-    Mock Get-ADDomain {
+    if ((Get-Command Get-ADDefaultDomainPasswordPolicy -ErrorAction SilentlyContinue).Count -eq 0) {
+        function Get-ADDefaultDomainPasswordPolicy () {}
+    }
+
+    Mock Get-ADDefaultDomainPasswordPolicy {
         [PSCustomObject]@{
-            DomainMode = "Windows2016Domain"
+            MaxPasswordAge = New-TimeSpan -Days 42
+            MinPasswordLength = 7
         }
     }
+
+    Mock Write-Host { $Object | ForEach-Object { Write-Verbose -Message $_ } }
 }
 Describe "$(($PSCommandPath | Split-Path -Leaf) -Replace '.tests.', '.')" {
-    Context "Under ideal conditions and using default values" {
-        It "Should Not Throw Error" {
-
-            { . $Path } | Should -Not -Throw
-
-            Should -Not -Invoke Write-Host -ParameterFilter { $Object -match "Error" }
-
-            $LASTEXITCODE | Should -Be 0
-        }
-    }
     Context "Input and Environment Validation" {
         It "Should error when not running on a server" {
             Mock Get-CimInstance {
@@ -52,7 +48,7 @@ Describe "$(($PSCommandPath | Split-Path -Leaf) -Replace '.tests.', '.')" {
                 }
             } -ParameterFilter { $ClassName -match "Win32_OperatingSystem" }
 
-            { . $Path } | Should -Not -Throw
+            { . $Path -AccountToManage "myAdmin" } | Should -Not -Throw
 
             Should -Invoke Write-Host -ParameterFilter { $Object -match "Error" -and $Object -match "controller" }
 
@@ -65,9 +61,69 @@ Describe "$(($PSCommandPath | Split-Path -Leaf) -Replace '.tests.', '.')" {
                 }
             }
 
-            { . $Path } | Should -Not -Throw
+            { . $Path -AccountToManage "myAdmin" } | Should -Not -Throw
 
             Should -Invoke Write-Host -ParameterFilter { $Object -match "Error" -and $Object -match "level" }
+
+            $LASTEXITCODE | Should -Be 1
+        }
+        It "Should error when given the account '<TestAccount>'" -TestCases @(
+            @{ TestAccount = $Null }
+            @{ TestAccount = "" }
+            @{ TestAccount = " " }
+            @{ TestAccount = "jsmi\th" }
+            @{ TestAccount = "jsmi/th" }
+            @{ TestAccount = "jsmi[th" }
+            @{ TestAccount = "jsmi]th" }
+            @{ TestAccount = "jsmi:th" }
+            @{ TestAccount = "jsmi;th" }
+            @{ TestAccount = "jsmi*th" }
+            @{ TestAccount = "jsmi?th" }
+            @{ TestAccount = "jsmi`"th" }
+            @{ TestAccount = "jsmi<th" }
+            @{ TestAccount = "jsmi>th" }
+            @{ TestAccount = "jsmi|th" }
+            @{ TestAccount = "jsmi,th" }
+            @{ TestAccount = "jsmi+th" }
+            @{ TestAccount = "jsmi@th" }
+            @{ TestAccount = "thisisareallylongacct" }
+        ){
+
+            { . $Path -AccountToManage $TestAccount } | Should -Not -Throw
+
+            Should -Invoke Write-Host -ParameterFilter { $Object -match "Error" -and $Object -match "account" }
+
+            $LASTEXITCODE | Should -Be 1
+        }
+        It "Should error when given the password length of '<TestPassLength>'" -TestCases @(
+            @{ TestPassLength = $Null }
+            @{ TestPassLength = "" }
+            @{ TestPassLength = " " }
+            @{ TestPassLength = "invalid" }
+            @{ TestPassLength = "6" }
+            @{ TestPassLength = "20.5" }
+            @{ TestPassLength = "65" }
+        ){
+
+            { . $Path -AccountToManage "myAdmin" -DesiredPassLength $TestPassLength } | Should -Not -Throw
+
+            Should -Invoke Write-Host -ParameterFilter { $Object -match "Error" -and $Object -match "length" }
+
+            $LASTEXITCODE | Should -Be 1
+        }
+        It "Should error when given the password age of '<TestPassAge>'" -TestCases @(
+            @{ TestPassAge = $Null }
+            @{ TestPassAge = "" }
+            @{ TestPassAge = " " }
+            @{ TestPassAge = "invalid" }
+            @{ TestPassAge = "6" }
+            @{ TestPassAge = "20.5" }
+            @{ TestPassAge = "91" }
+        ){
+
+            { . $Path -AccountToManage "myAdmin" -DesiredMaxPassAge $TestPassAge } | Should -Not -Throw
+
+            Should -Invoke Write-Host -ParameterFilter { $Object -match "Error" -and $Object -match "age" }
 
             $LASTEXITCODE | Should -Be 1
         }
