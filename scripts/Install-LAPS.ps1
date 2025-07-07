@@ -17,11 +17,12 @@
     A brief explanation of the parameter.
 
 .NOTES
-    Minimum OS Architecture Supported: Windows 10, Windows Server 2016
+    Minimum OS Architecture Supported: Windows Server 2016
+    Version: 1.0
     Release Notes: Initial Release
 
 .LICENSE
-    Copyright 2025 Kyle Bohlander - www.spacethoughts.net/about
+    Copyright © 2025 Kyle Pradlander - www.spacethoughts.net/about
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -43,12 +44,16 @@ param (
     [Parameter()]
     [String]$DesiredPassLength = 14,
     [Parameter()]
-    [String]$DesiredMaxPassAge = 30,
-    [Parameter()]
-    [Switch]$SetupAccountCreation
+    [String]$DesiredMaxPassAge = 30
 )
 
 begin {
+
+    # Check if the operating system build version is less than 14393 (Windows Server 2016 minimum requirement)
+    if ([System.Environment]::OSVersion.Version.Build -lt 14393) {
+        Write-Host -Object "`n[Warning] OS build '$([System.Environment]::OSVersion.Version.Build)' detected."
+        Write-Host -Object "[Warning] The minimum OS version supported by this script is Windows Server 2016 (14393). You may experience unexpected issues related to this.`n"
+    }
 
     if ([string]::IsNullOrWhiteSpace($AccountToManage)) {
         Write-Host -Object "[Error] You must provide the name of an account to manage with LAPS."
@@ -140,6 +145,18 @@ begin {
         }
     }
 
+    function Test-IsSystem {
+        [CmdletBinding()]
+        param ()
+
+        # Retrieve the current Windows identity of the user or process running the script
+        $WindowsIdentity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+
+        # Check if the identity is a system account by verifying the IsSystem property
+        # or comparing the User property to the well-known SID for the LocalSystem account (S-1-5-18)
+        $WindowsIdentity.IsSystem -or $WindowsIdentity.User -eq "S-1-5-18"
+    }
+
     function Test-IsElevated {
         [CmdletBinding()]
         param ()
@@ -164,7 +181,7 @@ begin {
 process {
     # Attempt to determine if the current session is running with Administrator privileges.
     try {
-        $IsElevated = Test-IsElevated -ErrorAction Stop
+        $IsElevated = Test-IsElevated -ErrorAction "Stop"
     } catch {
         Write-Host -Object "[Error] $($_.Exception.Message)"
         Write-Host -Object "[Error] Unable to determine if the account '$env:Username' is running with Administrator privileges."
@@ -177,7 +194,7 @@ process {
     }
 
     try {
-        $IsDomainController = Test-IsDomainController -ErrorAction Stop
+        $IsDomainController = Test-IsDomainController -ErrorAction "Stop"
     } catch {
         Write-Host -Object "[Error] $($_.Exception.Message)"
         Write-Host -Object "[Error] Unable to determine if this system is a Domain Controller or a Server."
@@ -190,14 +207,14 @@ process {
     }
 
     try {
-        $DefaultPasswordPolicy = Get-ADDefaultDomainPasswordPolicy -ErrorAction Stop
+        $DefaultPasswordPolicy = Get-ADDefaultDomainPasswordPolicy -ErrorAction "Stop"
     } catch {
         Write-Host -Object "[Error] $($_.Exception.Message)"
         Write-Host -Object "[Error] Failed to verify the password would meet the domains password complexity requirements."
         exit 1
     }
 
-    if ($DefaultPasswordPolicy.MaxPasswordAge.TotalDays -lt $MaxPassAge) {
+    if ($DefaultPasswordPolicy.MaxPasswordAge.TotalDays -ne 0 -and $DefaultPasswordPolicy.MaxPasswordAge.TotalDays -lt $MaxPassAge) {
         Write-Host -Object "[Error] The max password age you specified '$MaxPassAge' is invalid."
         Write-Host -Object "[Error] It is greater than the domains max password age of '$($DefaultPasswordPolicy.MaxPasswordAge.TotalDays)'."
         exit 1
@@ -211,7 +228,7 @@ process {
 
     try {
         Write-Host -Object "Verifying the domain functional level (DFL) is 2016 or higher."
-        $DomainFunctionalLevel = Get-ADDomain -ErrorAction Stop | Select-Object -ExpandProperty DomainMode -ErrorAction Stop
+        $DomainFunctionalLevel = Get-ADDomain -ErrorAction "Stop" | Select-Object -ExpandProperty DomainMode -ErrorAction "Stop"
         [int]$DomainFunctionalLevel = $DomainFunctionalLevel -replace "[^0-9]"
         if ([string]::IsNullOrWhiteSpace($DomainFunctionalLevel) -or $DomainFunctionalLevel -match "[^0-9]") {
             throw "Failed to parse the domain functional level."
@@ -228,9 +245,47 @@ process {
         exit 1
     }
 
+    if (!(Test-IsSystem)) {
+        Write-Host -Object "Verifying that the user '$env:USERNAME' is a member of the Domain Admins, Schema Admins, Enterprise Admins group."
+
+        try {
+            $DomainSID = (Get-ADDomain -ErrorAction "Stop").DomainSID.Value
+        } catch {
+            Write-Host -Object "[Error] $($_.Exception.Message)"
+            Write-Host -Object "[Error] Failed to fetch the SID of the Domain."
+            exit 1
+        }
+
+        try {
+            $ErrorActionPreference = "Stop"
+            $WindowsIdentity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+            $ErrorActionPreference = "Continue"
+        } catch {
+            $ErrorActionPreference = "Continue"
+            Write-Host -Object "[Error] $($_.Exception.Message)"
+            Write-Host -Object "[Error] Failed to retrieve the group membership of the individual user account."
+            exit 1
+        }
+
+        if ($WindowsIdentity.Groups.Value -notcontains "$DomainSid-512") {
+            Write-Host -Object "[Error] This account is currently not a member of the Domain Admins group."
+            exit 1
+        }
+
+        if ($WindowsIdentity.Groups.Value -notcontains "$DomainSid-518") {
+            Write-Host -Object "[Error] This account is currently not a member of the Schema Admins group."
+            exit 1
+        }
+
+        if ($WindowsIdentity.Groups.Value -notcontains "$DomainSid-519") {
+            Write-Host -Object "[Error] This account is currently not a member of the Enterprise Admins group."
+            exit 1
+        }
+    }
+
     try {
         Write-Host -Object "Updating the active directory schema for LAPS."
-        Update-LapsADSchema -ErrorAction Stop
+        Update-LapsADSchema -Confirm:$False -ErrorAction "Stop"
         Write-Host -Object "Update was successful."
     } catch {
         Write-Host -Object "[Error] $($_.Exception.Message)"
@@ -241,16 +296,18 @@ process {
 
     try {
         Write-Host -Object "Retrieving the current AD Domain."
-        $ADDomain = Get-ADDomain -ErrorAction Stop | Select-Object -ExpandProperty DistinguishedName -ErrorAction Stop
+        $ADDomain = Get-ADDomain -ErrorAction "Stop" | Select-Object -ExpandProperty DistinguishedName -ErrorAction "Stop"
 
-        Write-Host -Object "Giving permission to all devices in the domain of '$ADDomain' to update their individual LAPS password."
-        Set-LapsADComputerSelfPermission -Identity $ADDomain -ErrorAction Stop | Out-Null
+        Write-Host -Object "Allowing each computer in '$ADDomain' to synchronize (i.e., push) its LAPS password to its own computer object in Active Directory."
+        Set-LapsADComputerSelfPermission -Identity $ADDomain -ErrorAction "Stop" | Out-Null
         Write-Host -Object "Successfully updated the permissions."
     } catch {
         Write-Host -Object "[Error] $($_.Exception.Message)"
         Write-Host -Object "[Error] Failed to update the permissions."
         exit 1
     }
+
+
 
     exit $ExitCode
 }

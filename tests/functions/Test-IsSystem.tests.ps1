@@ -1,6 +1,6 @@
 ﻿BeforeAll {
     # Get script path
-    $Path = ".\functions\$($PSCommandPath | Split-Path -Leaf)" -replace '.tests.', '.'
+    $Path = ".\functions\$($PSCommandPath | Split-Path -Leaf)" -Replace '.tests.', '.'
     # Test that the script exists
     Test-Path -Path $Path | Should -BeTrue -Because "Script file should exist!"
 
@@ -13,7 +13,7 @@ Describe "$(($PSCommandPath | Split-Path -Leaf) -Replace '.tests.', '.')" {
         It "Should Not Throw Error" {
 
             { . $Path } | Should -Not -Throw
-            { Test-IsServer } | Should -Not -Throw
+            { Test-IsSystem } | Should -Not -Throw
 
             Should -Not -Invoke Write-Host -ParameterFilter { $Object -match "Error" }
         }

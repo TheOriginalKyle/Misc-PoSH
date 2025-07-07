@@ -10,6 +10,10 @@
         Get-CimInstance -ClassName "Win32_OperatingSystem"
     }
 
+    if ($OSInfo.OperatingSystemSKU -eq 175){
+        return $False
+    }
+
     switch ($OSInfo.ProductType) {
         "1" { $False }
         "2" { $True }
