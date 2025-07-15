@@ -44,7 +44,11 @@ param (
     [Parameter()]
     [String]$DesiredPassLength = 14,
     [Parameter()]
-    [String]$DesiredMaxPassAge = 30
+    [String]$DesiredMaxPassAge = 30,
+    [Parameter()]
+    [String]$WorkingDirectory = $env:TEMP,
+    [Parameter()]
+    [String]$LGPOUrl = "https://download.microsoft.com/download/8/5/c/85c25433-a1b0-4ffa-9429-7e023e7da8d8/LGPO.zip"
 )
 
 begin {
@@ -124,6 +128,401 @@ begin {
         Write-Host -Object "[Error] The password length provided of '$MaxPassAge' is invalid."
         Write-Host -Object "[Error] Only password ages greater than or equal to 7 and less than or equal to 90 are supported."
         exit 1
+    }
+
+    function Invoke-LegacyCMDUtility {
+        [CmdletBinding()]
+        param (
+            [Parameter(Mandatory = $True)]
+            [String]$FilePath,
+            [Parameter()]
+            [String[]]$ArgumentList,
+            [Parameter()]
+            [Int]$Timeout = 30,
+            [Parameter()]
+            [System.Text.Encoding]$Encoding
+        )
+
+        # Validate that FilePath is not null or empty
+        if ([String]::IsNullOrWhiteSpace($FilePath)) {
+            throw (New-Object System.ArgumentNullException("FilePath", "FilePath cannot be null or empty."))
+        }
+
+        # Check for invalid characters in the file path
+        if ($FilePath -match '[*?"<>|]' -or $FilePath.Substring(3) -match "[:]") {
+            throw (New-Object System.ArgumentException("The path '$FilePath' contains invalid characters."))
+        }
+
+        # Validate folder names in the file path
+        $FilePath -split '\\' | ForEach-Object {
+            $Folder = ($_).Trim()
+            if ($Folder -match '^(CON|PRN|AUX|NUL)$' -or $Folder -match '^(LPT|COM)\d$') {
+                throw (New-Object System.ArgumentException("An invalid folder name was found in '$FilePath'. The following folder names are reserved: CON, PRN, AUX, NUL, COM1-9, LPT1-9."))
+            }
+        }
+
+        # Resolve the file path if it is not rooted and does not exist in the current directory
+        if (!([System.IO.Path]::IsPathRooted($FilePath)) -and !(Test-Path -Path $FilePath -PathType Leaf -ErrorAction SilentlyContinue)) {
+            $EnvPaths = [System.Environment]::GetEnvironmentVariable("PATH").Split(";")
+            $PathExts = [System.Environment]::GetEnvironmentVariable("PATHEXT").Split(";")
+
+            $ResolvedPath = $null
+            foreach ($Directory in $EnvPaths) {
+                foreach ($FileExtension in $PathExts) {
+                    $PotentialMatch = Join-Path $Directory ($FilePath + $FileExtension)
+                    if (Test-Path $PotentialMatch -PathType Leaf) {
+                        $ResolvedPath = $PotentialMatch
+                        break
+                    }
+                }
+                if ($ResolvedPath) { break }
+            }
+
+            if ($ResolvedPath) {
+                $FilePath = $ResolvedPath
+            }
+        }
+
+        # Throw an error if the file does not exist
+        if (!(Test-Path -Path $FilePath -PathType Leaf -ErrorAction SilentlyContinue)) {
+            throw (New-Object System.IO.FileNotFoundException("No file was found at '$FilePath'."))
+        }
+
+        # Validate Timeout parameter
+        if ([String]::IsNullOrWhiteSpace($Timeout)) {
+            throw (New-Object System.ArgumentNullException("Timeout", "Timeout cannot be null or empty."))
+        }
+
+        # Ensure Timeout is greater than or equal to 30 seconds
+        if ($Timeout -lt 30) {
+            throw (New-Object System.ArgumentException("Timeout must be greater than or equal to 30 seconds."))
+        }
+
+        # Configure process start information
+        $ProcessInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $ProcessInfo.FileName = $FilePath
+        $ProcessInfo.Arguments = $ArgumentList -join " "
+        $ProcessInfo.UseShellExecute = $False
+        $ProcessInfo.RedirectStandardInput = $True
+        $ProcessInfo.RedirectStandardOutput = $True
+        $ProcessInfo.RedirectStandardError = $True
+        $ProcessInfo.CreateNoWindow = $True
+
+        # Determine encoding for standard output/error streams
+        if (!$Encoding) {
+            try {
+                if (-not ([System.Management.Automation.PSTypeName]'NativeMethods.Win32').Type) {
+                    $Definition = '[DllImport("kernel32.dll")]' + "`n" + 'public static extern uint GetOEMCP();'
+                    Add-Type -MemberDefinition $Definition -Name "Win32" -Namespace "NativeMethods" -ErrorAction Stop
+                }
+                [int]$OemCodePage = [NativeMethods.Win32]::GetOEMCP()
+                $Encoding = [System.Text.Encoding]::GetEncoding($OemCodePage)
+            } catch {
+                throw $_
+            }
+        }
+        $ProcessInfo.StandardOutputEncoding = $Encoding
+        $ProcessInfo.StandardErrorEncoding = $Encoding
+
+        # Create and configure the process object
+        $Process = New-Object System.Diagnostics.Process
+        $Process.StartInfo = $ProcessInfo
+        $Process | Add-Member -MemberType NoteProperty -Name StdOut -Value (New-Object System.Collections.Generic.List[string]) -Force | Out-Null
+        $Process | Add-Member -MemberType NoteProperty -Name StdErr -Value (New-Object System.Collections.Generic.List[string]) -Force | Out-Null
+
+        # Start the process
+        $Process.Start() | Out-Null
+
+        $ProcessTimeout = 0
+        $TimeoutInMilliseconds = $Timeout * 1000
+
+        # Initialize buffers for output/error streams
+        $StdOutBuffer = New-Object System.Text.StringBuilder
+        $StdErrBuffer = New-Object System.Text.StringBuilder
+
+        # Monitor process execution and read output/error streams
+        while (!$Process.HasExited -and $ProcessTimeout -lt $TimeoutInMilliseconds ) {
+            # Read standard output to prevent buffer overflow
+            while (!$Process.StandardOutput.EndOfStream -and $Process.StandardOutput.Peek() -ne -1) {
+                $Char = $Process.StandardOutput.Read()
+                if ($Char -ne -1) {
+                    $ActualCharacter = [char]$Char
+                    if ($ActualCharacter -eq "`n") {
+                        $Process.StdOut.Add($StdOutBuffer.ToString())
+                        $null = $StdOutBuffer.Clear()
+                    } elseif ($ActualCharacter -ne "`r") {
+                        $null = $StdOutBuffer.Append($ActualCharacter)
+                    }
+                }
+            }
+
+            # Read standard error to prevent buffer overflow
+            while (!$Process.StandardError.EndOfStream -and $Process.StandardError.Peek() -ne -1) {
+                $Char = $Process.StandardError.Read()
+                if ($Char -ne -1) {
+                    $ActualCharacter = [char]$Char
+                    if ($ActualCharacter -eq "`n") {
+                        $Process.StdErr.Add($StdErrBuffer.ToString())
+                        $null = $StdErrBuffer.Clear()
+                    } elseif ($ActualCharacter -ne "`r") {
+                        $null = $StdErrBuffer.Append($ActualCharacter)
+                    }
+                }
+            }
+
+            Start-Sleep -Milliseconds 100
+            $ProcessTimeout = $ProcessTimeout + 10
+        }
+
+        # Add final buffered content to StdOut and StdErr properties
+        if ($StdOutBuffer.Length -gt 0) {
+            $Process.StdOut.Add($StdOutBuffer.ToString())
+        }
+
+        if ($StdErrBuffer.Length -gt 0) {
+            $Process.StdErr.Add($StdErrBuffer.ToString())
+        }
+
+        try {
+            # Handle timeout scenarios
+            if ($ProcessTimeout -ge $TimeoutInMilliseconds) {
+                throw (New-Object System.ServiceProcess.TimeoutException("The process has timed out."))
+            }
+
+            # Wait for the process to exit within the remaining timeout period
+            $TimeoutRemaining = $TimeoutInMilliseconds - $ProcessTimeout
+            if (!$Process.WaitForExit($TimeoutRemaining)) {
+                throw (New-Object System.ServiceProcess.TimeoutException("The process has timed out."))
+            }
+        } catch {
+            # Set the global exit code and dispose of the process
+            if ($Process.ExitCode) {
+                $GLOBAL:LASTEXITCODE = $Process.ExitCode
+            } else {
+                $GLOBAL:LASTEXITCODE = 1
+            }
+
+            if ($Process) {
+                $Process.Dispose()
+            }
+
+            throw $_
+        }
+
+        # Final read of output and error streams to ensure all data is captured
+        while (!$Process.StandardOutput.EndOfStream) {
+            $Char = $Process.StandardOutput.Read()
+            if ($Char -ne -1) {
+                $ActualCharacter = [char]$Char
+                if ($ActualCharacter -eq "`n") {
+                    $Process.StdOut.Add($StdOutBuffer.ToString())
+                    $null = $StdOutBuffer.Clear()
+                } elseif ($ActualCharacter -ne "`r") {
+                    $null = $StdOutBuffer.Append($ActualCharacter)
+                }
+            }
+        }
+
+        while (!$Process.StandardError.EndOfStream) {
+            $Char = $Process.StandardError.Read()
+            if ($Char -ne -1) {
+                $ActualCharacter = [char]$Char
+                if ($ActualCharacter -eq "`n") {
+                    $Process.StdErr.Add($StdErrBuffer.ToString())
+                    $null = $StdErrBuffer.Clear()
+                } elseif ($ActualCharacter -ne "`r") {
+                    $null = $StdErrBuffer.Append($ActualCharacter)
+                }
+            }
+        }
+
+        # Log errors from the standard error stream
+        if ($Process.StdErr.Count -gt 0) {
+            if ($Process.ExitCode -or $Process.ExitCode -eq 0) {
+                $GLOBAL:LASTEXITCODE = $Process.ExitCode
+            }
+
+            if ($Process) {
+                $Process.Dispose()
+            }
+
+            $Process.StdErr | Write-Error -Category "FromStdErr"
+        }
+
+        # Return the standard output if available
+        if ($Process.StdOut.Count -gt 0) {
+            $Process.StdOut
+        }
+
+        # Set the global exit code
+        if ($Process.ExitCode -or $Process.ExitCode -eq 0) {
+            $GLOBAL:LASTEXITCODE = $Process.ExitCode
+        }
+
+        if ($Process) {
+            $Process.Dispose()
+        }
+    }
+
+    function Invoke-Download {
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory = $True)]
+            [System.Uri]$URL,
+            [Parameter(Mandatory = $True)]
+            [String]$Path,
+            [Parameter()]
+            [int]$Attempts = 3,
+            [Parameter()]
+            [Switch]$SkipSleep,
+            [Parameter()]
+            [Switch]$Overwrite
+        )
+
+        # Trim whitespace from URL and Path.
+        if ($URL) { $URL = $URL.OriginalString.Trim() }
+        if ($Path) { $Path = $Path.Trim() }
+
+        # Validate URL and Path parameters.
+        if (!($URL)) {
+            throw (New-Object System.ArgumentNullException("URL", "URL cannot be null."))
+        }
+        if (!($Path)) {
+            throw (New-Object System.ArgumentNullException("Path", "Path cannot be null."))
+        }
+
+        # Ensure URL starts with "http" or "https".
+        if ($URL.OriginalString -notmatch "^http") {
+            $URL = "https://$($URL.OriginalString)"
+            Write-Host -Object "[Warning] The URL provided does not contain 'http'. Modifying it to '$($URL.AbsoluteUri)'."
+        } else {
+            Write-Host -Object "The URL provided was '$($URL.AbsoluteUri)'."
+        }
+
+        # Validate Path for invalid characters.
+        if ($Path -match '[*?"<>|]' -or $Path.Substring(3) -match "[:]") {
+            throw (New-Object System.ArgumentException("The path '$Path' contains invalid characters."))
+        }
+
+        # Check for reserved folder names in the Path.
+        $Path -split '\\' | ForEach-Object {
+            $Folder = ($_).Trim()
+            if ($Folder -match '^(CON|PRN|AUX|NUL)$' -or $Folder -match '^(LPT|COM)\d$') {
+                throw (New-Object System.ArgumentException("An invalid folder name was given in '$Path'. The following folder names are reserved: CON, PRN, AUX, NUL, COM1-9, LPT1-9."))
+            }
+        }
+
+        # Ensure Path contains a filename.
+        if (($Path | Split-Path -Leaf) -notmatch "[.]") {
+            throw (New-Object System.ArgumentException("The path '$Path' must contain a filename."))
+        }
+
+        # Validate the number of attempts.
+        if ($Attempts -le 0) {
+            throw (New-Object System.ArgumentException("Attempts must be greater than 0."))
+        }
+
+        # Check if file already exists and handle overwrite flag.
+        if ((Test-Path -Path $Path -PathType Leaf -ErrorAction SilentlyContinue) -and !($Overwrite)) {
+            throw (New-Object System.IO.IOException("A file already exists at the path '$Path'."))
+        }
+
+        # Configure TLS settings for secure connections.
+        $SupportedTLSVersions = [enum]::GetValues('Net.SecurityProtocolType')
+        if (($SupportedTLSVersions -contains 'Tls13') -and ($SupportedTLSVersions -contains 'Tls12')) {
+            [Net.ServicePointManager]::SecurityProtocol = (
+                [Enum]::ToObject([Net.SecurityProtocolType], 12288) -bor [Enum]::ToObject([Net.SecurityProtocolType], 3072)
+            )
+        } else {
+            try {
+                [Net.ServicePointManager]::SecurityProtocol = [Enum]::ToObject([Net.SecurityProtocolType], 3072)
+            } catch {
+                Write-Host -Object "[Warning] $($_.Exception.Message)"
+                Write-Host -Object "[Warning] PowerShell does not have access to TLS 1.2 or higher on this system. This download may fail."
+            }
+        }
+
+        # Ensure the destination folder exists.
+        $DestinationFolder = $Path | Split-Path
+        if (!(Test-Path -Path $DestinationFolder -ErrorAction SilentlyContinue)) {
+            try {
+                Write-Host -Object "Attempting to create the folder '$DestinationFolder' as it does not exist."
+                New-Item -Path $DestinationFolder -ItemType "Directory" -ErrorAction Stop | Out-Null
+                Write-Host -Object "Successfully created the destination folder."
+            } catch {
+                throw $_
+            }
+        }
+
+        Write-Host -Object "Downloading the file."
+
+        # Suppress progress output during download.
+        $PreviousProgressPreference = $ProgressPreference
+        $ProgressPreference = 'SilentlyContinue'
+
+        # Attempt to download the file multiple times.
+        $DownloadAttempt = 1
+        while ($DownloadAttempt -lt $Attempts) {
+            if (!($SkipSleep)) {
+                # Introduce random sleep between attempts.
+                $SleepTime = Get-Random -Minimum 3 -Maximum 15
+                Write-Host -Object "Waiting for $SleepTime seconds."
+                Start-Sleep -Seconds $SleepTime
+            }
+
+            if ($DownloadAttempt -ne 1) { Write-Host -Object "" }
+            Write-Host -Object "Download Attempt $DownloadAttempt"
+
+            try {
+                # Use Invoke-WebRequest for PowerShell 4.0+ or fallback to WebClient.
+                if ($PSVersionTable.PSVersion.Major -ge 4) {
+                    $WebRequestArgs = @{
+                        Uri                = $URL
+                        OutFile            = $Path
+                        MaximumRedirection = 10
+                        UseBasicParsing    = $true
+                        TimeoutSec         = 300
+                    }
+
+                    Invoke-WebRequest @WebRequestArgs
+                } else {
+                    $WebClient = New-Object System.Net.WebClient
+                    $WebClient.DownloadFile($URL, $Path)
+                }
+
+                # Verify if the file was downloaded successfully.
+                $File = Test-Path -Path $Path -ErrorAction SilentlyContinue
+            } catch {
+                Write-Host -Object "[Warning] An error occurred while downloading!"
+                Write-Host -Object "[Warning] $($_.Exception.Message)"
+
+                # Remove partially downloaded file if an error occurs.
+                if (Test-Path -Path $Path -ErrorAction SilentlyContinue) {
+                    Remove-Item $Path -Force -Confirm:$false -ErrorAction SilentlyContinue
+                }
+
+                $File = $False
+            }
+
+            # Exit loop if download succeeds.
+            if ($File) {
+                $DownloadAttempt = $Attempts
+            } else {
+                Write-Host -Object "[Warning] File failed to download.`n"
+            }
+
+            $DownloadAttempt++
+        }
+
+        # Restore progress preference.
+        $ProgressPreference = $PreviousProgressPreference
+
+        # Verify final download success and return the file object.
+        if (!(Test-Path -Path $Path -PathType Leaf -ErrorAction SilentlyContinue)) {
+            throw [System.IO.FileNotFoundException]::New("Failed to download file. Please verify the URL '$($URL.AbsoluteUri)'.")
+        } else {
+            return (Get-Item -Path $Path)
+        }
     }
 
     function Test-IsDomainController {
@@ -307,7 +706,169 @@ process {
         exit 1
     }
 
+    try {
+        Write-Host -Object "Creating the Group Policy file structure at '$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}'."
+        if (!(Test-Path -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}" -PathType Container -ErrorAction SilentlyContinue)) {
+            New-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}" -ItemType Directory -ErrorAction Stop | Out-Null
+            New-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol" -ItemType Directory -ErrorAction Stop | Out-Null
+            New-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO" -ItemType Directory -ErrorAction Stop | Out-Null
+            New-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine" -ItemType Directory -ErrorAction Stop | Out-Null
+            New-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\User" -ItemType Directory -ErrorAction Stop | Out-Null
+            New-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\Scripts" -ItemType Directory -ErrorAction Stop | Out-Null
+            New-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\Scripts\Shutdown" -ItemType Directory -ErrorAction Stop | Out-Null
+            New-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\Scripts\Startup" -ItemType Directory -ErrorAction Stop | Out-Null
+        }
+        $Comment = @"
+<?xml version='1.0' encoding='utf-8'?>
+<policyComments xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" revision="1.0" schemaVersion="1.0" xmlns="http://www.microsoft.com/GroupPolicy/CommentDefinitions">
+  <policyNamespaces>
+    <using prefix="ns0" namespace="Microsoft.Policies.LAPS"></using>
+  </policyNamespaces>
+  <comments>
+    <admTemplate></admTemplate>
+  </comments>
+  <resources minRequiredRevision="1.0">
+    <stringTable></stringTable>
+  </resources>
+</policyComments>
+"@
+        $Comment | Out-File -FilePath "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\comment.cmtx" -ErrorAction Stop
 
 
+    } catch {
+        Write-Host -Object "[Error] $($_.Exception.Message)"
+        Write-Host -Object "[Error] Failed to create the group policy backup at '$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}'."
+        exit 1
+    }
+
+    try {
+        $RegistryPOL = @"
+Computer
+SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\LAPS
+PasswordComplexity
+DWORD:4
+
+Computer
+SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\LAPS
+PasswordLength
+DWORD:$DesiredPassLength[System.Net.Dns]::GetHostEntry($env:COMPUTERNA
+
+Computer
+SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\LAPS
+PasswordAgeDays
+DWORD:$DesiredMaxPassAge
+
+Computer
+SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\LAPS
+PasswordExpirationProtectionEnabled
+DWORD:1
+
+Computer
+SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\LAPS
+BackupDirectory
+DWORD:2
+
+Computer
+SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\LAPS
+AdministratorAccountName
+SZ:$AccountToManage
+
+Computer
+SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\LAPS
+ADPasswordEncryptionEnabled
+DWORD:1
+
+Computer
+SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\LAPS
+ADEncryptedPasswordHistorySize
+DWORD:3
+"@
+        $RegistryPOL | Out-File -FilePath "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registrypol.txt" -ErrorAction Stop
+    } catch {
+        Write-Host -Object "[Error] $($_.Exception.Message)"
+        Write-Host -Object "[Error] Failed to create registry.pol file at '$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registry.pol'."
+        exit 1
+    }
+
+    try {
+        Write-Host -Object "Downloading the Local Group Policy Object Utility from the Microsoft Security Compliance Toolkit."
+        $LGPOUtility = Invoke-Download -URL $LGPOUrl -Path "$WorkingDirectory\LGPO.zip" -Overwrite -ErrorAction Stop
+
+        Write-Host -Object "Extracting LGPO.zip to '$WorkingDirectory'"
+        $PreviousProgressPreference = $ProgressPreference
+        $ProgressPreference = 'SilentlyContinue'
+
+        Expand-Archive -Path "$WorkingDirectory\LGPO.zip" -DestinationPath "$WorkingDirectory\LGPO" -Force -ErrorAction Stop
+        $ProgressPreference = $PreviousProgressPreference
+    } catch {
+        $ProgressPreference = $PreviousProgressPreference
+        Write-Host -Object "[Error] $($_.Exception.Message)"
+        Write-Host -Object "[Error] Failed to download and extract the Local Group Policy Object Utility."
+        exit 1
+    }
+
+    try {
+        Remove-Item -Path "$WorkingDirectory\LGPO.zip" -Force -ErrorAction Stop
+    } catch {
+        Write-Host -Object "[Warning] $($_.Exception.Message)"
+        Write-Host -Object "[Warning] Failed to remove '$WorkingDirectory\LGPO.zip'"
+    }
+
+    try {
+        Write-Host -Object "Converting '$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registrypol.txt' to a .pol file."
+        $LGPOArguments = @(
+            "/r"
+            "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registrypol.txt"
+            "/w"
+            "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registry.pol"
+        )
+        Invoke-LegacyCMDUtility -FilePath "$WorkingDirectory\LGPO\LGPO_30\LGPO.exe" -ArgumentList $LGPOArguments -ErrorAction SilentlyContinue
+
+        if (!Test-Path -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registry.pol" -ErrorAction SilentlyContinue) {
+            throw (New-Object System.IO.FileNotFoundException("'$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registrypol.pol' was not found."))
+        }
+
+        if (!(Get-Content -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registry.pol" -ErrorAction SilentlyContinue)) {
+            throw (New-Object System.IO.IOException("'$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registrypol.txt' failed to convert."))
+        }
+    } catch {
+        Write-Host -Object "[Error] $($_.Exception.Message)"
+        Write-Host -Object "[Error] Failed to convert registrypol.txt to a registry.pol file."
+        exit 1
+    }
+
+    try {
+        Remove-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registrypol.txt" -Force -ErrorAction Stop
+    } catch {
+        Write-Host -Object "[Warning] $($_.Exception.Message)"
+        Write-Host -Object "[Warning] Failed to remove '$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registrypol.txt'"
+    }
+
+    try {
+        Write-Host -Object "Creating Backup xml at '$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}'"
+        [xml]$BackupXML = "<?xml version=`"1.0`" encoding=`"utf-8`"?><!-- Copyright (c) Microsoft Corporation.  All rights reserved. --><GroupPolicyBackupScheme bkp:version=`"2.0`" bkp:type=`"GroupPolicyBackupTemplate`" xmlns:bkp=`"http://www.microsoft.com/GroupPolicy/GPOOperations`" xmlns=`"http://www.microsoft.com/GroupPolicy/GPOOperations`">
+    <GroupPolicyObject><SecurityGroups><Group bkp:Source=`"FromDACL`"><Sid><![CDATA[S-1-5-21-1030753660-4277942142-2209373172-519]]></Sid><SamAccountName><![CDATA[Enterprise Admins]]></SamAccountName><Type><![CDATA[UniversalGroup]]></Type><NetBIOSDomainName><![CDATA[test]]></NetBIOSDomainName><DnsDomainName><![CDATA[test.lan]]></DnsDomainName><UPN><![CDATA[Enterprise Admins@test.lan]]></UPN></Group><Group bkp:Source=`"FromDACL`"><Sid><![CDATA[S-1-5-21-1030753660-4277942142-2209373172-512]]></Sid><SamAccountName><![CDATA[Domain Admins]]></SamAccountName><Type><![CDATA[GlobalGroup]]></Type><NetBIOSDomainName><![CDATA[test]]></NetBIOSDomainName><DnsDomainName><![CDATA[test.lan]]></DnsDomainName><UPN><![CDATA[Domain Admins@test.lan]]></UPN></Group></SecurityGroups><FilePaths/><GroupPolicyCoreSettings><ID><![CDATA[{7D34FF20-69C9-4D02-B681-1CBB956F3F25}]]></ID><Domain><![CDATA[test.lan]]></Domain><SecurityDescriptor>01 00 04 9c 00 00 00 00 00 00 00 00 00 00 00 00 14 00 00 00 04 00 ec 00 08 00 00 00 05 02 28 00 00 01 00 00 01 00 00 00 8f fd ac ed b3 ff d1 11 b4 1d 00 a0 c9 68 f9 39 01 01 00 00 00 00 00 05 0b 00 00 00 00 00 24 00 ff 00 0f 00 01 05 00 00 00 00 00 05 15 00 00 00 7c 0d 70 3d 7e 37 fc fe f4 5b b0 83 00 02 00 00 00 02 24 00 ff 00 0f 00 01 05 00 00 00 00 00 05 15 00 00 00 7c 0d 70 3d 7e 37 fc fe f4 5b b0 83 00 02 00 00 00 02 24 00 ff 00 0f 00 01 05 00 00 00 00 00 05 15 00 00 00 7c 0d 70 3d 7e 37 fc fe f4 5b b0 83 07 02 00 00 00 02 14 00 94 00 02 00 01 01 00 00 00 00 00 05 09 00 00 00 00 02 14 00 94 00 02 00 01 01 00 00 00 00 00 05 0b 00 00 00 00 02 14 00 ff 00 0f 00 01 01 00 00 00 00 00 05 12 00 00 00 00 0a 14 00 ff 00 0f 00 01 01 00 00 00 00 00 03 00 00 00 00</SecurityDescriptor><DisplayName><![CDATA[Windows LAPS]]></DisplayName><Options><![CDATA[0]]></Options><UserVersionNumber><![CDATA[0]]></UserVersionNumber><MachineVersionNumber><![CDATA[393222]]></MachineVersionNumber><MachineExtensionGuids><![CDATA[[{35378EAC-683F-11D2-A89A-00C04FBBCFA2}{D02B1F72-3407-48AE-BA88-E8213C6761F1}]]]></MachineExtensionGuids><UserExtensionGuids/><WMIFilter/></GroupPolicyCoreSettings>
+        <GroupPolicyExtension bkp:ID=`"{35378EAC-683F-11D2-A89A-00C04FBBCFA2}`" bkp:DescName=`"Registry`">
+            <FSObjectFile bkp:Path=`"%GPO_MACH_FSPATH%\registry.pol`" bkp:SourceExpandedPath=`"\\$([System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName)\sysvol\test.lan\Policies\{7D34FF20-69C9-4D02-B681-1CBB956F3F25}\Machine\registry.pol`" bkp:Location=`"DomainSysvol\GPO\Machine\registry.pol`"/>
+
+            <FSObjectFile bkp:Path=`"%GPO_FSPATH%\Adm\*.*`" bkp:SourceExpandedPath=`"\\$([System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName)\sysvol\test.lan\Policies\{7D34FF20-69C9-4D02-B681-1CBB956F3F25}\Adm\*.*`"/>
+        </GroupPolicyExtension>
+
+
+
+
+
+
+
+
+
+    <GroupPolicyExtension bkp:ID=`"{F15C46CD-82A0-4C2D-A210-5D0D3182A418}`" bkp:DescName=`"Unknown Extension`"><FSObjectFile bkp:Path=`"%GPO_MACH_FSPATH%\comment.cmtx`" bkp:SourceExpandedPath=`"\\$([System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName)\sysvol\test.lan\Policies\{7D34FF20-69C9-4D02-B681-1CBB956F3F25}\Machine\comment.cmtx`" bkp:Location=`"DomainSysvol\GPO\Machine\comment.cmtx`"/><FSObjectDir bkp:Path=`"%GPO_MACH_FSPATH%\Scripts`" bkp:SourceExpandedPath=`"\\$([System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName)\sysvol\test.lan\Policies\{7D34FF20-69C9-4D02-B681-1CBB956F3F25}\Machine\Scripts`" bkp:Location=`"DomainSysvol\GPO\Machine\Scripts`"/><FSObjectDir bkp:Path=`"%GPO_MACH_FSPATH%\Scripts\Shutdown`" bkp:SourceExpandedPath=`"\\$([System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName)\sysvol\test.lan\Policies\{7D34FF20-69C9-4D02-B681-1CBB956F3F25}\Machine\Scripts\Shutdown`" bkp:Location=`"DomainSysvol\GPO\Machine\Scripts\Shutdown`"/><FSObjectDir bkp:Path=`"%GPO_MACH_FSPATH%\Scripts\Startup`" bkp:SourceExpandedPath=`"\\$([System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName)\sysvol\test.lan\Policies\{7D34FF20-69C9-4D02-B681-1CBB956F3F25}\Machine\Scripts\Startup`" bkp:Location=`"DomainSysvol\GPO\Machine\Scripts\Startup`"/></GroupPolicyExtension></GroupPolicyObject>
+</GroupPolicyBackupScheme>"
+        $BackupXML | Out-File "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\Backup.xml"
+    } catch {
+        Write-Host -Object "[Error] $($_.Exception.Message)"
+        Write-Host -Object "[Error] Failed to create the backup xml."
+        exit 1
+    }
     exit $ExitCode
 }

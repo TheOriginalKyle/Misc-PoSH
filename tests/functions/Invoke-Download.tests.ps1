@@ -16,6 +16,11 @@ AfterAll {
 }
 Describe "$(($PSCommandPath | Split-Path -Leaf) -Replace '.tests.', '.')" {
     Context "Under ideal conditions and using default values" {
+        BeforeEach {
+            if (Test-Path -Path "$env:TEMP\DownloadTest" -ErrorAction SilentlyContinue) {
+                Remove-Item -Path "$env:TEMP\DownloadTest" -Recurse -Confirm:$False -Force
+            }
+        }
         It "Should Not Throw Error" {
 
             { . $Path } | Should -Not -Throw
