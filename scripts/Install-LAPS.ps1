@@ -732,7 +732,7 @@ process {
   </resources>
 </policyComments>
 "@
-        $Comment | Out-File -FilePath "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\comment.cmtx" -ErrorAction Stop
+        $Comment | Out-File -FilePath "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\comment.cmtx" -Encoding UTF8 -ErrorAction Stop
 
 
     } catch {
@@ -783,7 +783,7 @@ SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\LAPS
 ADEncryptedPasswordHistorySize
 DWORD:3
 "@
-        $RegistryPOL | Out-File -FilePath "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registrypol.txt" -ErrorAction Stop
+        $RegistryPOL | Out-File -FilePath "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registrypol.txt" -Encoding UTF8 -ErrorAction Stop
     } catch {
         Write-Host -Object "[Error] $($_.Exception.Message)"
         Write-Host -Object "[Error] Failed to create registry.pol file at '$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registry.pol'."
