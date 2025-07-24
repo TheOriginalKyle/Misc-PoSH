@@ -694,7 +694,12 @@ process {
         }
     }
 
-    if (Get-ADComputer -Identity "SRV22-DC1-TEST" -Properties "ms-mcs-AdmPwd" -ErrorAction SilentlyContinue) {
+    $ErrorActionPreference = "SilentlyContinue"
+    $LegacyLAPS = Get-ADComputer -Identity "$env:COMPUTERNAME" -Properties "ms-mcs-AdmPwd" -ErrorAction SilentlyContinue
+    $WindowsLAPS = Get-ADComputer -Identity "$env:COMPUTERNAME" -Properties "msLAPS-Password" -ErrorAction SilentlyContinue
+    $ErrorActionPreference = "Continue"
+
+    if ($LegacyLAPS) {
         Write-Host -Object "`n[Alert] Legacy LAPS is detected. Windows LAPS and Legacy LAPS can coexist so long as they are not managing the same account."
         Write-Host -Object "[Alert] Removal of Legacy LAPS is recommended."
         Write-Host -Object "[Alert] https://learn.microsoft.com/windows-server/identity/laps/laps-scenarios-migration`n"
@@ -703,7 +708,7 @@ process {
     try {
         Write-Host -Object "Updating the active directory schema for LAPS."
 
-        if (!(Get-ADComputer -Identity "SRV22-DC1-TEST" -Properties "msLAPS-Password" -ErrorAction SilentlyContinue)) {
+        if (!$WindowsLAPS) {
             Update-LapsADSchema -Confirm:$False -ErrorAction "Stop"
         } else {
             Write-Host -Object "The LAPS active directory schema is already present."
