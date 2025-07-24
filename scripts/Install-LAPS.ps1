@@ -732,7 +732,7 @@ process {
   </resources>
 </policyComments>
 "@
-        $Comment | Out-File -FilePath "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\comment.cmtx" -Encoding UTF8 -ErrorAction Stop
+        $Comment | Out-File -FilePath "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\comment.cmtx" -Encoding "UTF8" -ErrorAction Stop
 
 
     } catch {
@@ -783,7 +783,7 @@ SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\LAPS
 ADEncryptedPasswordHistorySize
 DWORD:3
 "@
-        $RegistryPOL | Out-File -FilePath "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registrypol.txt" -Encoding UTF8 -ErrorAction Stop
+        $RegistryPOL | Out-File -FilePath "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registrypol.txt" -Encoding "UTF8" -ErrorAction Stop
     } catch {
         Write-Host -Object "[Error] $($_.Exception.Message)"
         Write-Host -Object "[Error] Failed to create registry.pol file at '$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registry.pol'."
@@ -848,13 +848,22 @@ DWORD:3
 
     try {
         Write-Host -Object "Creating Backup and Backup Info xml at '$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}'"
+        $DomainSid = (Get-ADDomain -ErrorAction Stop).DomainSID.Value
+        $NetBiosName = (Get-ADDomain -ErrorAction Stop).NetBIOSName
+        $FQHostname = $([System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName)
+        $DomainName = $(([System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain()).Name)
+
+        if ([string]::IsNullOrWhiteSpace($DomainSID) -or [string]::IsNullOrWhiteSpace($NetBiosName) -or [string]::IsNullOrWhiteSpace($FQHostname) -or [string]::IsNullOrWhiteSpace($DomainName)) {
+            throw (New-Object System.ArgumentNullException("Failed to fetch some of the required domain information."))
+        }
+
         $BackupXML = @"
 <?xml version="1.0" encoding="utf-8"?><!-- Copyright (c) Microsoft Corporation.  All rights reserved. --><GroupPolicyBackupScheme bkp:version="2.0" bkp:type="GroupPolicyBackupTemplate" xmlns:bkp="http://www.microsoft.com/GroupPolicy/GPOOperations" xmlns="http://www.microsoft.com/GroupPolicy/GPOOperations">
-    <GroupPolicyObject><SecurityGroups><Group bkp:Source="FromDACL"><Sid><![CDATA[$((Get-ADDomain).DomainSID.Value)-519]]></Sid><SamAccountName><![CDATA[Enterprise Admins]]></SamAccountName><Type><![CDATA[UniversalGroup]]></Type><NetBIOSDomainName><![CDATA[$((Get-ADDomain).NetBIOSName)]]></NetBIOSDomainName><DnsDomainName><![CDATA[$(([System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain()).Name)]]></DnsDomainName><UPN><![CDATA[Enterprise Admins@$(([System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain()).Name)]]></UPN></Group><Group bkp:Source="FromDACL"><Sid><![CDATA[$((Get-ADDomain).DomainSID.Value)-512]]></Sid><SamAccountName><![CDATA[Domain Admins]]></SamAccountName><Type><![CDATA[GlobalGroup]]></Type><NetBIOSDomainName><![CDATA[$((Get-ADDomain).NetBIOSName)]]></NetBIOSDomainName><DnsDomainName><![CDATA[$(([System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain()).Name)]]></DnsDomainName><UPN><![CDATA[Domain Admins@$(([System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain()).Name)]]></UPN></Group></SecurityGroups><FilePaths/><GroupPolicyCoreSettings><ID><![CDATA[{7D34FF20-69C9-4D02-B681-1CBB956F3F25}]]></ID><Domain><![CDATA[$(([System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain()).Name)]]></Domain><SecurityDescriptor>01 00 04 9c 00 00 00 00 00 00 00 00 00 00 00 00 14 00 00 00 04 00 ec 00 08 00 00 00 05 02 28 00 00 01 00 00 01 00 00 00 8f fd ac ed b3 ff d1 11 b4 1d 00 a0 c9 68 f9 39 01 01 00 00 00 00 00 05 0b 00 00 00 00 00 24 00 ff 00 0f 00 01 05 00 00 00 00 00 05 15 00 00 00 7c 0d 70 3d 7e 37 fc fe f4 5b b0 83 00 02 00 00 00 02 24 00 ff 00 0f 00 01 05 00 00 00 00 00 05 15 00 00 00 7c 0d 70 3d 7e 37 fc fe f4 5b b0 83 00 02 00 00 00 02 24 00 ff 00 0f 00 01 05 00 00 00 00 00 05 15 00 00 00 7c 0d 70 3d 7e 37 fc fe f4 5b b0 83 07 02 00 00 00 02 14 00 94 00 02 00 01 01 00 00 00 00 00 05 09 00 00 00 00 02 14 00 94 00 02 00 01 01 00 00 00 00 00 05 0b 00 00 00 00 02 14 00 ff 00 0f 00 01 01 00 00 00 00 00 05 12 00 00 00 00 0a 14 00 ff 00 0f 00 01 01 00 00 00 00 00 03 00 00 00 00</SecurityDescriptor><DisplayName><![CDATA[Windows LAPS]]></DisplayName><Options><![CDATA[0]]></Options><UserVersionNumber><![CDATA[0]]></UserVersionNumber><MachineVersionNumber><![CDATA[393222]]></MachineVersionNumber><MachineExtensionGuids><![CDATA[[{35378EAC-683F-11D2-A89A-00C04FBBCFA2}{D02B1F72-3407-48AE-BA88-E8213C6761F1}]]]></MachineExtensionGuids><UserExtensionGuids/><WMIFilter/></GroupPolicyCoreSettings>
+    <GroupPolicyObject><SecurityGroups><Group bkp:Source="FromDACL"><Sid><![CDATA[$DomainSid-519]]></Sid><SamAccountName><![CDATA[Enterprise Admins]]></SamAccountName><Type><![CDATA[UniversalGroup]]></Type><NetBIOSDomainName><![CDATA[$NetBiosName]]></NetBIOSDomainName><DnsDomainName><![CDATA[$DomainName]]></DnsDomainName><UPN><![CDATA[Enterprise Admins@$DomainName]]></UPN></Group><Group bkp:Source="FromDACL"><Sid><![CDATA[$DomainSid-512]]></Sid><SamAccountName><![CDATA[Domain Admins]]></SamAccountName><Type><![CDATA[GlobalGroup]]></Type><NetBIOSDomainName><![CDATA[$NetBiosName]]></NetBIOSDomainName><DnsDomainName><![CDATA[$DomainName]]></DnsDomainName><UPN><![CDATA[Domain Admins@$DomainName]]></UPN></Group></SecurityGroups><FilePaths/><GroupPolicyCoreSettings><ID><![CDATA[{7D34FF20-69C9-4D02-B681-1CBB956F3F25}]]></ID><Domain><![CDATA[$DomainName]]></Domain><SecurityDescriptor>01 00 04 9c 00 00 00 00 00 00 00 00 00 00 00 00 14 00 00 00 04 00 ec 00 08 00 00 00 05 02 28 00 00 01 00 00 01 00 00 00 8f fd ac ed b3 ff d1 11 b4 1d 00 a0 c9 68 f9 39 01 01 00 00 00 00 00 05 0b 00 00 00 00 00 24 00 ff 00 0f 00 01 05 00 00 00 00 00 05 15 00 00 00 7c 0d 70 3d 7e 37 fc fe f4 5b b0 83 00 02 00 00 00 02 24 00 ff 00 0f 00 01 05 00 00 00 00 00 05 15 00 00 00 7c 0d 70 3d 7e 37 fc fe f4 5b b0 83 00 02 00 00 00 02 24 00 ff 00 0f 00 01 05 00 00 00 00 00 05 15 00 00 00 7c 0d 70 3d 7e 37 fc fe f4 5b b0 83 07 02 00 00 00 02 14 00 94 00 02 00 01 01 00 00 00 00 00 05 09 00 00 00 00 02 14 00 94 00 02 00 01 01 00 00 00 00 00 05 0b 00 00 00 00 02 14 00 ff 00 0f 00 01 01 00 00 00 00 00 05 12 00 00 00 00 0a 14 00 ff 00 0f 00 01 01 00 00 00 00 00 03 00 00 00 00</SecurityDescriptor><DisplayName><![CDATA[Windows LAPS]]></DisplayName><Options><![CDATA[0]]></Options><UserVersionNumber><![CDATA[0]]></UserVersionNumber><MachineVersionNumber><![CDATA[393222]]></MachineVersionNumber><MachineExtensionGuids><![CDATA[[{35378EAC-683F-11D2-A89A-00C04FBBCFA2}{D02B1F72-3407-48AE-BA88-E8213C6761F1}]]]></MachineExtensionGuids><UserExtensionGuids/><WMIFilter/></GroupPolicyCoreSettings>
         <GroupPolicyExtension bkp:ID="{35378EAC-683F-11D2-A89A-00C04FBBCFA2}" bkp:DescName="Registry">
-            <FSObjectFile bkp:Path="%GPO_MACH_FSPATH%\registry.pol" bkp:SourceExpandedPath="\\$([System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName)\sysvol\$(([System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain()).Name)\Policies\{7D34FF20-69C9-4D02-B681-1CBB956F3F25}\Machine\registry.pol" bkp:Location="DomainSysvol\GPO\Machine\registry.pol"/>
+            <FSObjectFile bkp:Path="%GPO_MACH_FSPATH%\registry.pol" bkp:SourceExpandedPath="\\$FQHostname\sysvol\$DomainName\Policies\{7D34FF20-69C9-4D02-B681-1CBB956F3F25}\Machine\registry.pol" bkp:Location="DomainSysvol\GPO\Machine\registry.pol"/>
 
-            <FSObjectFile bkp:Path="%GPO_FSPATH%\Adm\*.*" bkp:SourceExpandedPath="\\$([System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName)\sysvol\$(([System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain()).Name)\Policies\{7D34FF20-69C9-4D02-B681-1CBB956F3F25}\Adm\*.*"/>
+            <FSObjectFile bkp:Path="%GPO_FSPATH%\Adm\*.*" bkp:SourceExpandedPath="\\$FQHostname\sysvol\$DomainName\Policies\{7D34FF20-69C9-4D02-B681-1CBB956F3F25}\Adm\*.*"/>
         </GroupPolicyExtension>
 
 
@@ -865,17 +874,17 @@ DWORD:3
 
 
 
-    <GroupPolicyExtension bkp:ID="{F15C46CD-82A0-4C2D-A210-5D0D3182A418}" bkp:DescName="Unknown Extension"><FSObjectFile bkp:Path="%GPO_MACH_FSPATH%\comment.cmtx" bkp:SourceExpandedPath="\\$([System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName)\sysvol\$(([System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain()).Name)\Policies\{7D34FF20-69C9-4D02-B681-1CBB956F3F25}\Machine\comment.cmtx" bkp:Location="DomainSysvol\GPO\Machine\comment.cmtx"/><FSObjectDir bkp:Path="%GPO_MACH_FSPATH%\Scripts" bkp:SourceExpandedPath="\\$([System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName)\sysvol\$(([System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain()).Name)\Policies\{7D34FF20-69C9-4D02-B681-1CBB956F3F25}\Machine\Scripts" bkp:Location="DomainSysvol\GPO\Machine\Scripts"/><FSObjectDir bkp:Path="%GPO_MACH_FSPATH%\Scripts\Shutdown" bkp:SourceExpandedPath="\\$([System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName)\sysvol\$(([System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain()).Name)\Policies\{7D34FF20-69C9-4D02-B681-1CBB956F3F25}\Machine\Scripts\Shutdown" bkp:Location="DomainSysvol\GPO\Machine\Scripts\Shutdown"/><FSObjectDir bkp:Path="%GPO_MACH_FSPATH%\Scripts\Startup" bkp:SourceExpandedPath="\\$([System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName)\sysvol\$(([System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain()).Name)\Policies\{7D34FF20-69C9-4D02-B681-1CBB956F3F25}\Machine\Scripts\Startup" bkp:Location="DomainSysvol\GPO\Machine\Scripts\Startup"/></GroupPolicyExtension></GroupPolicyObject>
+    <GroupPolicyExtension bkp:ID="{F15C46CD-82A0-4C2D-A210-5D0D3182A418}" bkp:DescName="Unknown Extension"><FSObjectFile bkp:Path="%GPO_MACH_FSPATH%\comment.cmtx" bkp:SourceExpandedPath="\\$FQHostname\sysvol\$DomainName\Policies\{7D34FF20-69C9-4D02-B681-1CBB956F3F25}\Machine\comment.cmtx" bkp:Location="DomainSysvol\GPO\Machine\comment.cmtx"/><FSObjectDir bkp:Path="%GPO_MACH_FSPATH%\Scripts" bkp:SourceExpandedPath="\\$FQHostname\sysvol\$DomainName\Policies\{7D34FF20-69C9-4D02-B681-1CBB956F3F25}\Machine\Scripts" bkp:Location="DomainSysvol\GPO\Machine\Scripts"/><FSObjectDir bkp:Path="%GPO_MACH_FSPATH%\Scripts\Shutdown" bkp:SourceExpandedPath="\\$FQHostname\sysvol\$DomainName\Policies\{7D34FF20-69C9-4D02-B681-1CBB956F3F25}\Machine\Scripts\Shutdown" bkp:Location="DomainSysvol\GPO\Machine\Scripts\Shutdown"/><FSObjectDir bkp:Path="%GPO_MACH_FSPATH%\Scripts\Startup" bkp:SourceExpandedPath="\\$FQHostname\sysvol\$DomainName\Policies\{7D34FF20-69C9-4D02-B681-1CBB956F3F25}\Machine\Scripts\Startup" bkp:Location="DomainSysvol\GPO\Machine\Scripts\Startup"/></GroupPolicyExtension></GroupPolicyObject>
 </GroupPolicyBackupScheme>
 "@
-        $BackupXML | Out-File "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\Backup.xml" -Encoding UTF8
+        $BackupXML | Out-File "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\Backup.xml" -Encoding "UTF8" -ErrorAction Stop
 
-        $LastWriteTime = Get-ItemProperty -Path "C:\Windows\Temp\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\Backup.xml" | Select-Object -ExpandProperty LastWriteTime
+        $LastWriteTime = Get-ItemProperty -Path "C:\Windows\Temp\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\Backup.xml" -ErrorAction Stop | Select-Object -ExpandProperty "LastWriteTime" -ErrorAction Stop
 
         $BackupInfoXML = @"
-<BackupInst xmlns="http://www.microsoft.com/GroupPolicy/GPOOperations/Manifest"><GPOGuid><![CDATA[{7D34FF20-69C9-4D02-B681-1CBB956F3F25}]]></GPOGuid><GPODomain><![CDATA[$(([System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain()).Name)]]></GPODomain><GPODomainGuid><![CDATA[{2061ae04-eed7-43ea-a262-bf9bf9fe1e89}]]></GPODomainGuid><GPODomainController><![CDATA[$([System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName)]]></GPODomainController><BackupTime><![CDATA[$($LastWriteTime.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss"))]]></BackupTime><ID><![CDATA[{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}]]></ID><Comment><![CDATA[]]></Comment><GPODisplayName><![CDATA[Windows LAPS]]></GPODisplayName></BackupInst>
+<BackupInst xmlns="http://www.microsoft.com/GroupPolicy/GPOOperations/Manifest"><GPOGuid><![CDATA[{7D34FF20-69C9-4D02-B681-1CBB956F3F25}]]></GPOGuid><GPODomain><![CDATA[$DomainName]]></GPODomain><GPODomainGuid><![CDATA[{2061ae04-eed7-43ea-a262-bf9bf9fe1e89}]]></GPODomainGuid><GPODomainController><![CDATA[$FQHostname]]></GPODomainController><BackupTime><![CDATA[$($LastWriteTime.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss"))]]></BackupTime><ID><![CDATA[{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}]]></ID><Comment><![CDATA[]]></Comment><GPODisplayName><![CDATA[Windows LAPS]]></GPODisplayName></BackupInst>
 "@
-        $BackupInfoXML | Out-File "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\bkupInfo.xml" -Encoding UTF8
+        $BackupInfoXML | Out-File "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\bkupInfo.xml" -Encoding "UTF8" -ErrorAction Stop
         Set-ItemProperty -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\bkupInfo.xml" -Name Attributes -Value ([System.IO.FileAttributes]::Hidden) -ErrorAction Stop
     } catch {
         Write-Host -Object "[Error] $($_.Exception.Message)"
