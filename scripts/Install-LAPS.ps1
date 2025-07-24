@@ -46,9 +46,11 @@ param (
     [Parameter()]
     [String]$DesiredMaxPassAge = 30,
     [Parameter()]
-    [String]$WorkingDirectory = $env:TEMP,
+    [String]$WorkingDirectory = "$env:TEMP\Windows-LAPS-Script",
     [Parameter()]
-    [String]$LGPOUrl = "https://download.microsoft.com/download/8/5/c/85c25433-a1b0-4ffa-9429-7e023e7da8d8/LGPO.zip"
+    [String]$LGPOUrl = "https://download.microsoft.com/download/8/5/c/85c25433-a1b0-4ffa-9429-7e023e7da8d8/LGPO.zip",
+    [Parameter()]
+    [Switch]$Force
 )
 
 begin {
@@ -682,9 +684,30 @@ process {
         }
     }
 
+    if (!(Test-Path -Path $WorkingDirectory -ErrorAction SilentlyContinue)) {
+        try {
+            New-Item -Path $WorkingDirectory -ItemType "Directory" -Force -ErrorAction Stop | Out-Null
+        } catch {
+            Write-Host -Object "[Error] $($_.Exception.Message)"
+            Write-Host -Object "[Error] Failed to create the working directory '$WorkingDirectory'."
+            exit 1
+        }
+    }
+
+    if (Get-ADComputer -Identity "SRV22-DC1-TEST" -Properties "ms-mcs-AdmPwd" -ErrorAction SilentlyContinue) {
+        Write-Host -Object "`n[Alert] Legacy LAPS is detected. Windows LAPS and Legacy LAPS can coexist so long as they are not managing the same account."
+        Write-Host -Object "[Alert] Removal of Legacy LAPS is recommended."
+        Write-Host -Object "[Alert] https://learn.microsoft.com/windows-server/identity/laps/laps-scenarios-migration`n"
+    }
+
     try {
         Write-Host -Object "Updating the active directory schema for LAPS."
-        Update-LapsADSchema -Confirm:$False -ErrorAction "Stop"
+
+        if (!(Get-ADComputer -Identity "SRV22-DC1-TEST" -Properties "msLAPS-Password" -ErrorAction SilentlyContinue)) {
+            Update-LapsADSchema -Confirm:$False -ErrorAction "Stop"
+        } else {
+            Write-Host -Object "The LAPS active directory schema is already present."
+        }
         Write-Host -Object "Update was successful."
     } catch {
         Write-Host -Object "[Error] $($_.Exception.Message)"
@@ -695,7 +718,7 @@ process {
 
     try {
         Write-Host -Object "Retrieving the current AD Domain."
-        $ADDomain = Get-ADDomain -ErrorAction "Stop" | Select-Object -ExpandProperty DistinguishedName -ErrorAction "Stop"
+        $ADDomain = Get-ADDomain -ErrorAction "Stop" | Select-Object -ExpandProperty "DistinguishedName" -ErrorAction "Stop"
 
         Write-Host -Object "Allowing each computer in '$ADDomain' to synchronize (i.e., push) its LAPS password to its own computer object in Active Directory."
         Set-LapsADComputerSelfPermission -Identity $ADDomain -ErrorAction "Stop" | Out-Null
@@ -706,17 +729,30 @@ process {
         exit 1
     }
 
+    $WindowsLAPSGPO = Get-GPO -Name "Windows LAPS" -ErrorAction SilentlyContinue
+    if ($WindowsLAPSGPO -and !$Force) {
+        Write-Host -Object "`nThe 'Windows LAPS' GPO is already present. Please use -Force to overwrite the existing GPO."
+        Write-Host -Object "You may need to link it to the OU you would like to apply it to."
+        $WindowsLAPSGPO | Format-List | Out-String | Write-Host
+
+        exit $ExitCode
+    }
+
+    if ($WindowsLAPSGPO -and $Force) {
+        Write-Host -Object "`nThe 'Windows LAPS' GPO is already present. Overwriting it is as requested."
+    }
+
     try {
-        Write-Host -Object "Creating the Group Policy file structure at '$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}'."
-        if (!(Test-Path -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}" -PathType Container -ErrorAction SilentlyContinue)) {
-            New-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}" -ItemType Directory -ErrorAction Stop | Out-Null
-            New-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol" -ItemType Directory -ErrorAction Stop | Out-Null
-            New-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO" -ItemType Directory -ErrorAction Stop | Out-Null
-            New-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine" -ItemType Directory -ErrorAction Stop | Out-Null
-            New-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\User" -ItemType Directory -ErrorAction Stop | Out-Null
-            New-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\Scripts" -ItemType Directory -ErrorAction Stop | Out-Null
-            New-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\Scripts\Shutdown" -ItemType Directory -ErrorAction Stop | Out-Null
-            New-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\Scripts\Startup" -ItemType Directory -ErrorAction Stop | Out-Null
+        Write-Host -Object "`nCreating the Group Policy file structure at '$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}'."
+        if (!(Test-Path -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}" -PathType "Container" -ErrorAction SilentlyContinue)) {
+            New-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}" -ItemType "Directory" -ErrorAction Stop | Out-Null
+            New-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol" -ItemType "Directory" -ErrorAction Stop | Out-Null
+            New-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO" -ItemType "Directory" -ErrorAction Stop | Out-Null
+            New-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine" -ItemType "Directory" -ErrorAction Stop | Out-Null
+            New-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\User" -ItemType "Directory" -ErrorAction Stop | Out-Null
+            New-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\Scripts" -ItemType "Directory" -ErrorAction Stop | Out-Null
+            New-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\Scripts\Shutdown" -ItemType "Directory" -ErrorAction Stop | Out-Null
+            New-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\Scripts\Startup" -ItemType "Directory" -ErrorAction Stop | Out-Null
         }
         $Comment = @"
 <?xml version='1.0' encoding='utf-8'?>
@@ -839,6 +875,16 @@ DWORD:3
         exit 1
     }
 
+    if (Test-Path -Path "$WorkingDirectory\LGPO" -PathType "Container" -ErrorAction SilentlyContinue) {
+        try {
+            Remove-Item -Path "$WorkingDirectory\LGPO" -Recurse -Force -Confirm:$False -ErrorAction Stop
+        } catch {
+            Write-Host -Object "[Error] $($_.Exception.Message)"
+            Write-Host -Object "[Error] Failed to remove '$WorkingDirectory\LGPO'."
+            $ExitCode = 1
+        }
+    }
+
     try {
         Remove-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registrypol.txt" -Force -ErrorAction Stop
     } catch {
@@ -879,17 +925,47 @@ DWORD:3
 "@
         $BackupXML | Out-File "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\Backup.xml" -Encoding "UTF8" -ErrorAction Stop
 
-        $LastWriteTime = Get-ItemProperty -Path "C:\Windows\Temp\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\Backup.xml" -ErrorAction Stop | Select-Object -ExpandProperty "LastWriteTime" -ErrorAction Stop
+        $LastWriteTime = Get-ItemProperty -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\Backup.xml" -ErrorAction Stop | Select-Object -ExpandProperty "LastWriteTime" -ErrorAction Stop
 
         $BackupInfoXML = @"
 <BackupInst xmlns="http://www.microsoft.com/GroupPolicy/GPOOperations/Manifest"><GPOGuid><![CDATA[{7D34FF20-69C9-4D02-B681-1CBB956F3F25}]]></GPOGuid><GPODomain><![CDATA[$DomainName]]></GPODomain><GPODomainGuid><![CDATA[{2061ae04-eed7-43ea-a262-bf9bf9fe1e89}]]></GPODomainGuid><GPODomainController><![CDATA[$FQHostname]]></GPODomainController><BackupTime><![CDATA[$($LastWriteTime.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss"))]]></BackupTime><ID><![CDATA[{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}]]></ID><Comment><![CDATA[]]></Comment><GPODisplayName><![CDATA[Windows LAPS]]></GPODisplayName></BackupInst>
 "@
         $BackupInfoXML | Out-File "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\bkupInfo.xml" -Encoding "UTF8" -ErrorAction Stop
-        Set-ItemProperty -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\bkupInfo.xml" -Name Attributes -Value ([System.IO.FileAttributes]::Hidden) -ErrorAction Stop
+        Set-ItemProperty -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\bkupInfo.xml" -Name "Attributes" -Value ([System.IO.FileAttributes]::Hidden) -ErrorAction Stop
     } catch {
         Write-Host -Object "[Error] $($_.Exception.Message)"
         Write-Host -Object "[Error] Failed to create the backup xml."
         exit 1
+    }
+
+    try {
+        Write-Host -Object "Attempting to import the new GPO."
+        Import-GPO -Path "$WorkingDirectory" -BackupGPOName "Windows LAPS" -TargetName "Windows LAPS" -CreateIfNeeded -ErrorAction Stop
+        Write-Host -Object "The Windows LAPS GPO object has been imported. Please link it to the OU you would like it to apply to."
+    } catch {
+        Write-Host -Object "[Error] $($_.Exception.Message)"
+        Write-Host -Object "[Error] Failed to import the gpo."
+        exit 1
+    }
+
+    if (Test-Path -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}" -PathType "Container" -ErrorAction SilentlyContinue) {
+        try {
+            Remove-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}" -Recurse -Force -Confirm:$False -ErrorAction Stop
+        } catch {
+            Write-Host -Object "[Error] $($_.Exception.Message)"
+            Write-Host -Object "[Error] Failed to remove '$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}'."
+            $ExitCode = 1
+        }
+    }
+
+    if (Test-Path -Path "$WorkingDirectory\manifest.xml" -PathType "Leaf" -ErrorAction SilentlyContinue) {
+        try {
+            Remove-Item -Path "$WorkingDirectory\manifest.xml" -Force -Confirm:$False -ErrorAction Stop
+        } catch {
+            Write-Host -Object "[Error] $($_.Exception.Message)"
+            Write-Host -Object "[Error] Failed to remove '$WorkingDirectory\manifest.xml'."
+            $ExitCode = 1
+        }
     }
 
     exit $ExitCode
