@@ -50,10 +50,17 @@ param (
     [Parameter()]
     [String]$LGPOUrl = "https://download.microsoft.com/download/8/5/c/85c25433-a1b0-4ffa-9429-7e023e7da8d8/LGPO.zip",
     [Parameter()]
-    [Switch]$Force
+    [Switch]$LinkToRootOfDomain = [System.Boolean]::Parse($env:linkLapsGpoToDomainRoot),
+    [Parameter()]
+    [Switch]$Force = [System.Boolean]::Parse($env:force)
 )
 
 begin {
+    # If Ninja script variables are used, replace the command line parameters with their value.
+    # https://ninjarmm.zendesk.com/hc/articles/17783013460621-Automation-Library-Using-Variables-in-Scripts
+    if ($env:accountToManage) { $AccountToManage = $env:accountToManage }
+    if ($env:desiredPasswordLength) { $DesiredPassLength = $env:desiredPasswordLength }
+    if ($env:desiredMaxPasswordAge) { $DesiredMaxPassAge = $env:desiredMaxPasswordAge }
 
     # Check if the operating system build version is less than 14393 (Windows Server 2016 minimum requirement)
     if ([System.Environment]::OSVersion.Version.Build -lt 14393) {
@@ -103,7 +110,7 @@ begin {
 
     if ($PassLength -lt 7 -or $PassLength -gt 64) {
         Write-Host -Object "[Error] The passowrd length provided of '$PassLength' is invalid."
-        Write-Host -Object "[Error] Only password lengths greater than or equal to 7 and less than or equal to 90 are supported."
+        Write-Host -Object "[Error] Only password lengths greater than or equal to 7 and less than or equal to 64 are supported."
         exit 1
     }
 
@@ -737,8 +744,27 @@ process {
     $WindowsLAPSGPO = Get-GPO -Name "Windows LAPS" -ErrorAction SilentlyContinue
     if ($WindowsLAPSGPO -and !$Force) {
         Write-Host -Object "`nThe 'Windows LAPS' GPO is already present. Please use -Force to overwrite the existing GPO."
-        Write-Host -Object "You may need to link it to the OU you would like to apply it to."
-        $WindowsLAPSGPO | Format-List | Out-String | Write-Host
+        $WindowsLAPSGPO
+
+        if (!$LinkToRootOfDomain) {
+            Write-Host -Object "You may need to link it to your desired OU to finish the deploy."
+        }
+
+        if ($LinkToRootOfDomain) {
+            try {
+                Write-Host -Object "`nLinking the new GPO to the root of the domain."
+                $DistinguishedName = (Get-ADDomain -ErrorAction Stop).DistinguishedName
+                $WindowsLAPSGPO | Set-GPLink -Target $DistinguishedName -LinkEnabled "Yes" -ErrorAction Stop
+            } catch {
+                try {
+                    $WindowsLAPSGPO | New-GPLink -Target $DistinguishedName -LinkEnabled "Yes" -ErrorAction Stop
+                } catch {
+                    Write-Host -Object "[Error] $($_.Exception.Message)"
+                    Write-Host -Object "[Error] Failed to link the GPO. You may need to link it manually."
+                }
+                exit 1
+            }
+        }
 
         exit $ExitCode
     }
@@ -945,8 +971,9 @@ DWORD:3
 
     try {
         Write-Host -Object "Attempting to import the new GPO."
-        Import-GPO -Path "$WorkingDirectory" -BackupGPOName "Windows LAPS" -TargetName "Windows LAPS" -CreateIfNeeded -ErrorAction Stop
-        Write-Host -Object "The Windows LAPS GPO object has been imported. Please link it to the OU you would like it to apply to."
+        $NewGPO = Import-GPO -Path "$WorkingDirectory" -BackupGPOName "Windows LAPS" -TargetName "Windows LAPS" -CreateIfNeeded -ErrorAction Stop
+        $NewGPO
+        Write-Host -Object "The Windows LAPS GPO object has been imported."
     } catch {
         Write-Host -Object "[Error] $($_.Exception.Message)"
         Write-Host -Object "[Error] Failed to import the gpo."
@@ -970,6 +997,26 @@ DWORD:3
             Write-Host -Object "[Error] $($_.Exception.Message)"
             Write-Host -Object "[Error] Failed to remove '$WorkingDirectory\manifest.xml'."
             $ExitCode = 1
+        }
+    }
+
+    if (!$LinkToRootOfDomain) {
+        Write-Host -Object "`nThe GPO object has been imported. Please link it to your desired OU to finish the deploy."
+    }
+
+    if ($LinkToRootOfDomain) {
+        try {
+            Write-Host -Object "`nLinking the new GPO to the root of the domain."
+            $DistinguishedName = (Get-ADDomain -ErrorAction Stop).DistinguishedName
+            $WindowsLAPSGPO | Set-GPLink -Target $DistinguishedName -LinkEnabled "Yes" -ErrorAction Stop
+        } catch {
+            try {
+                $WindowsLAPSGPO | New-GPLink -Target $DistinguishedName -LinkEnabled "Yes" -ErrorAction Stop
+            } catch {
+                Write-Host -Object "[Error] $($_.Exception.Message)"
+                Write-Host -Object "[Error] Failed to link the GPO. You may need to link it manually."
+            }
+            exit 1
         }
     }
 
