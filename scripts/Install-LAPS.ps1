@@ -17,7 +17,7 @@
     A brief explanation of the parameter.
 
 .NOTES
-    Minimum OS Architecture Supported: Windows Server 2016
+    Minimum OS Architecture Supported: Windows Server 2019
     Version: 1.0
     Release Notes: Initial Release
 
@@ -62,10 +62,12 @@ begin {
     if ($env:desiredPasswordLength) { $DesiredPassLength = $env:desiredPasswordLength }
     if ($env:desiredMaxPasswordAge) { $DesiredMaxPassAge = $env:desiredMaxPasswordAge }
 
-    # Check if the operating system build version is less than 14393 (Windows Server 2016 minimum requirement)
-    if ([System.Environment]::OSVersion.Version.Build -lt 14393) {
-        Write-Host -Object "`n[Warning] OS build '$([System.Environment]::OSVersion.Version.Build)' detected."
-        Write-Host -Object "[Warning] The minimum OS version supported by this script is Windows Server 2016 (14393). You may experience unexpected issues related to this.`n"
+    # Check if the operating system build version is less than 17763 (Windows Server 2019 minimum requirement)
+    if ([System.Environment]::OSVersion.Version.Build -lt 17763) {
+        Write-Host -Object "[Error] OS build '$([System.Environment]::OSVersion.Version.Build)' detected."
+        Write-Host -Object "[Error] The minimum OS version supported by this script is Windows Server 2019 (17763)."
+        Write-Host -Object "[Error] https://learn.microsoft.com/windows-server/identity/laps/laps-overview#windows-laps-supported-platforms"
+        exit 1
     }
 
     if ([string]::IsNullOrWhiteSpace($AccountToManage)) {
