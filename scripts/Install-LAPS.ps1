@@ -7,7 +7,8 @@
     Long Description
 
 .EXAMPLE
-    (No Parameters)
+    -AccountToManage "testAdmin" -DesiredPassLength 14 -DesiredMaxPassAge 30 -LinkToRootOfDomain
+
     ## EXAMPLE OUTPUT WITHOUT PARAMS ##
 
 .PARAMETER SomeParam
@@ -703,6 +704,12 @@ process {
         }
     }
 
+    if (!(Get-Module -ListAvailable "LAPS" -ErrorAction SilentlyContinue)) {
+        Write-Host -Object "[Error] The Windows LAPS PowerShell module is not currently installed."
+        Write-Host -Object "[Error] The Windows LAPS PowerShell module was released as part of an update to Windows Server."
+        exit 1
+    }
+
     $ErrorActionPreference = "SilentlyContinue"
     $LegacyLAPS = Get-ADComputer -Identity "$env:COMPUTERNAME" -Properties "ms-mcs-AdmPwd" -ErrorAction SilentlyContinue
     $WindowsLAPS = Get-ADComputer -Identity "$env:COMPUTERNAME" -Properties "msLAPS-Password" -ErrorAction SilentlyContinue
@@ -763,8 +770,8 @@ process {
                 } catch {
                     Write-Host -Object "[Error] $($_.Exception.Message)"
                     Write-Host -Object "[Error] Failed to link the GPO. You may need to link it manually."
+                    exit 1
                 }
-                exit 1
             }
         }
 
@@ -1010,15 +1017,16 @@ DWORD:3
         try {
             Write-Host -Object "`nLinking the new GPO to the root of the domain."
             $DistinguishedName = (Get-ADDomain -ErrorAction Stop).DistinguishedName
-            $WindowsLAPSGPO | Set-GPLink -Target $DistinguishedName -LinkEnabled "Yes" -ErrorAction Stop
+            $NewGPO | Set-GPLink -Target $DistinguishedName -LinkEnabled "Yes" -ErrorAction Stop
+            Write-Host -Object "Successfully linked the new GPO."
         } catch {
             try {
-                $WindowsLAPSGPO | New-GPLink -Target $DistinguishedName -LinkEnabled "Yes" -ErrorAction Stop
+                $NewGPO | New-GPLink -Target $DistinguishedName -LinkEnabled "Yes" -ErrorAction Stop
             } catch {
                 Write-Host -Object "[Error] $($_.Exception.Message)"
                 Write-Host -Object "[Error] Failed to link the GPO. You may need to link it manually."
+                exit 1
             }
-            exit 1
         }
     }
 
