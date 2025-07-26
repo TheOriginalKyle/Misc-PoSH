@@ -1,3 +1,3 @@
 @{
-    ExcludeRules=@('PSAvoidUsingWriteHost','PSUseOutputTypeCorrectly')
+    ExcludeRules=@('PSAvoidUsingWriteHost', 'PSUseDeclaredVarsMoreThanAssignments', 'PSUseOutputTypeCorrectly')
 }

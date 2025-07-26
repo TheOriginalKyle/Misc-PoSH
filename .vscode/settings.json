@@ -1,5 +1,6 @@
 {
     "cSpell.words": [
+        "Bohlander",
         "Clixml",
         "Hashtable",
         "HKCC",
@@ -17,7 +18,8 @@
         "notcontains",
         "notlike",
         "Passthru",
-        "RSAT"
+        "RSAT",
+        "spacethoughts"
     ],
     "powershell.codeFormatting.pipelineIndentationStyle": "IncreaseIndentationForFirstPipeline",
     "powershell.codeFormatting.trimWhitespaceAroundPipe": true,
