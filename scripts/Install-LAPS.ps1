@@ -71,13 +71,16 @@ begin {
         exit 1
     }
 
+    # Validate that the account to manage is provided and not empty
     if ([string]::IsNullOrWhiteSpace($AccountToManage)) {
         Write-Host -Object "[Error] You must provide the name of an account to manage with LAPS."
         exit 1
     }
 
+    # Trim whitespace from the account name
     $AccountToManage = $AccountToManage.Trim()
 
+    # Check for illegal characters in the account name
     if ($AccountToManage -match '[\\/:;*?"<>|,+@]|\[|]') {
         Write-Host -Object "[Error] The account to manage you provided '$AccountToManage' is invalid."
         Write-Host -Object "[Error] It contains one of the following illegal characters: '\/[]:;*?`"<>|,+@'"
@@ -85,6 +88,14 @@ begin {
         exit 1
     }
 
+    # Check for whitespace in the account name
+    if ($AccountToManage -match '\s') {
+        Write-Host -Object "[Error] The account to manage you provided '$AccountToManage' is invalid. It contains whitespace."
+        Write-Host -Object "[Error] https://learn.microsoft.com/previous-versions/windows/it-pro/windows-2000-server/bb726984(v=technet.10)"
+        exit 1
+    }
+
+    # Ensure the account name does not exceed 20 characters
     if ($AccountToManage.Length -gt 20) {
         Write-Host -Object "[Error] The account to manage you provided '$AccountToManage' is invalid."
         Write-Host -Object "[Error] It is greater than 20 characters."
@@ -92,17 +103,20 @@ begin {
         exit 1
     }
 
+    # Validate that the desired password length is provided and not empty
     if ([string]::IsNullOrWhiteSpace($DesiredPassLength)) {
         Write-Host -Object "[Error] You must provide a maximum length for the password used for the managed account."
         exit 1
     }
 
+    # Ensure the password length contains only numeric characters
     if ($DesiredPassLength -match '[^0-9]') {
         Write-Host -Object "[Error] The maximum password length provided of '$DesiredPassLength' is invalid."
         Write-Host -Object "[Error] Only numeric characters are allowed."
         exit 1
     }
 
+    # Convert the desired password length to an integer and handle conversion errors
     try {
         [int]$PassLength = $DesiredPassLength
     } catch {
@@ -111,23 +125,27 @@ begin {
         exit 1
     }
 
+    # Ensure the password length is within the valid range (7-64)
     if ($PassLength -lt 7 -or $PassLength -gt 64) {
-        Write-Host -Object "[Error] The passowrd length provided of '$PassLength' is invalid."
+        Write-Host -Object "[Error] The password length provided of '$PassLength' is invalid."
         Write-Host -Object "[Error] Only password lengths greater than or equal to 7 and less than or equal to 64 are supported."
         exit 1
     }
 
+    # Validate that the desired maximum password age is provided and not empty
     if ([string]::IsNullOrWhiteSpace($DesiredMaxPassAge)) {
         Write-Host -Object "[Error] You must provide a maximum password age for the password used for the managed account."
         exit 1
     }
 
+    # Ensure the maximum password age contains only numeric characters
     if ($DesiredMaxPassAge -match '[^0-9]') {
         Write-Host -Object "[Error] The maximum password age provided of '$DesiredMaxPassAge' is invalid."
         Write-Host -Object "[Error] Only numeric characters are allowed."
         exit 1
     }
 
+    # Convert the desired maximum password age to an integer and handle conversion errors
     try {
         [int]$MaxPassAge = $DesiredMaxPassAge
     } catch {
@@ -136,8 +154,9 @@ begin {
         exit 1
     }
 
+    # Ensure the maximum password age is within the valid range (7-90)
     if ($MaxPassAge -lt 7 -or $MaxPassAge -gt 90) {
-        Write-Host -Object "[Error] The password length provided of '$MaxPassAge' is invalid."
+        Write-Host -Object "[Error] The password age provided of '$MaxPassAge' is invalid."
         Write-Host -Object "[Error] Only password ages greater than or equal to 7 and less than or equal to 90 are supported."
         exit 1
     }
@@ -599,11 +618,13 @@ process {
         exit 1
     }
 
+    # Check if the script is running with elevated privileges
     if (!$IsElevated) {
-        Write-Host -Object "[Error] Access Denied: Please run with Administrator privileges."
+        Write-Host -Object "[Error] The account '$env:Username' is not currently running this script with Administrator privileges."
         exit 1
     }
 
+    # Determine if the system is a Domain Controller
     try {
         $IsDomainController = Test-IsDomainController -ErrorAction "Stop"
     } catch {
@@ -612,31 +633,36 @@ process {
         exit 1
     }
 
+    # Exit if the system is not a Domain Controller
     if (!$IsDomainController) {
         Write-Host -Object "[Error] This device is not a Domain Controller. Unable to deploy LAPS."
         exit 1
     }
 
+    # Retrieve the default domain password policy
     try {
         $DefaultPasswordPolicy = Get-ADDefaultDomainPasswordPolicy -ErrorAction "Stop"
     } catch {
         Write-Host -Object "[Error] $($_.Exception.Message)"
-        Write-Host -Object "[Error] Failed to verify the password would meet the domains password complexity requirements."
+        Write-Host -Object "[Error] Failed to verify the password would meet the domain's password complexity requirements."
         exit 1
     }
 
+    # Validate the max password age against the domain's policy
     if ($DefaultPasswordPolicy.MaxPasswordAge.TotalDays -ne 0 -and $DefaultPasswordPolicy.MaxPasswordAge.TotalDays -lt $MaxPassAge) {
         Write-Host -Object "[Error] The max password age you specified '$MaxPassAge' is invalid."
-        Write-Host -Object "[Error] It is greater than the domains max password age of '$($DefaultPasswordPolicy.MaxPasswordAge.TotalDays)'."
+        Write-Host -Object "[Error] It is greater than the domain's max password age of '$($DefaultPasswordPolicy.MaxPasswordAge.TotalDays)'."
         exit 1
     }
 
+    # Validate the password length against the domain's policy
     if ($DefaultPasswordPolicy.MinPasswordLength -gt $PassLength) {
         Write-Host -Object "[Error] The password length you specified '$PassLength' is invalid."
-        Write-Host -Object "[Error] It is less than the domains min password length of '$($DefaultPasswordPolicy.MinPasswordLength)'."
+        Write-Host -Object "[Error] It is less than the domain's min password length of '$($DefaultPasswordPolicy.MinPasswordLength)'."
         exit 1
     }
 
+    # Verify the domain functional level is 2016 or higher
     try {
         Write-Host -Object "Verifying the domain functional level (DFL) is 2016 or higher."
         $DomainFunctionalLevel = Get-ADDomain -ErrorAction "Stop" | Select-Object -ExpandProperty DomainMode -ErrorAction "Stop"
@@ -650,12 +676,14 @@ process {
         exit 1
     }
 
+    # Exit if the domain functional level is below 2016
     if ($DomainFunctionalLevel -lt 2016) {
         Write-Host -Object "[Error] The domain functional level (DFL) is currently '$DomainFunctionalLevel'. This is not supported by either LAPS or this script."
         Write-Host -Object "[Error] https://learn.microsoft.com/windows-server/identity/laps/laps-scenarios-windows-server-active-directory#domain-functional-level-and-domain-controller-operating-system-version-requirements"
         exit 1
     }
 
+    # Verify the user is a member of required groups if not running as SYSTEM
     if (!(Test-IsSystem)) {
         Write-Host -Object "Verifying that the user '$env:USERNAME' is a member of the Domain Admins, Schema Admins, Enterprise Admins group."
 
@@ -678,22 +706,26 @@ process {
             exit 1
         }
 
+        # Check membership in Domain Admins group
         if ($WindowsIdentity.Groups.Value -notcontains "$DomainSid-512") {
             Write-Host -Object "[Error] This account is currently not a member of the Domain Admins group."
             exit 1
         }
 
+        # Check membership in Schema Admins group
         if ($WindowsIdentity.Groups.Value -notcontains "$DomainSid-518") {
             Write-Host -Object "[Error] This account is currently not a member of the Schema Admins group."
             exit 1
         }
 
+        # Check membership in Enterprise Admins group
         if ($WindowsIdentity.Groups.Value -notcontains "$DomainSid-519") {
             Write-Host -Object "[Error] This account is currently not a member of the Enterprise Admins group."
             exit 1
         }
     }
 
+    # Ensure the working directory exists
     if (!(Test-Path -Path $WorkingDirectory -ErrorAction SilentlyContinue)) {
         try {
             New-Item -Path $WorkingDirectory -ItemType "Directory" -Force -ErrorAction Stop | Out-Null
@@ -704,61 +736,80 @@ process {
         }
     }
 
+    # Check if the Windows LAPS PowerShell module is installed
     if (!(Get-Module -ListAvailable "LAPS" -ErrorAction SilentlyContinue)) {
         Write-Host -Object "[Error] The Windows LAPS PowerShell module is not currently installed."
         Write-Host -Object "[Error] The Windows LAPS PowerShell module was released as part of an update to Windows Server."
         exit 1
     }
 
+    # Set the error action preference to silently continue to suppress errors temporarily
     $ErrorActionPreference = "SilentlyContinue"
+
+    # Check for the presence of Legacy LAPS by querying the ms-mcs-AdmPwd attribute on the current computer object
     $LegacyLAPS = Get-ADComputer -Identity "$env:COMPUTERNAME" -Properties "ms-mcs-AdmPwd" -ErrorAction SilentlyContinue
+
+    # Check for the presence of Windows LAPS by querying the msLAPS-Password attribute on the current computer object
     $WindowsLAPS = Get-ADComputer -Identity "$env:COMPUTERNAME" -Properties "msLAPS-Password" -ErrorAction SilentlyContinue
+
+    # Restore the error action preference to its default value
     $ErrorActionPreference = "Continue"
 
+    # If Legacy LAPS is detected, display an alert recommending its removal
     if ($LegacyLAPS) {
-        Write-Host -Object "`n[Alert] Legacy LAPS is detected. Windows LAPS and Legacy LAPS can coexist so long as they are not managing the same account."
+        Write-Host -Object "`n[Alert] Legacy LAPS is detected. Windows LAPS and Legacy LAPS can coexist as long as they are not managing the same account."
         Write-Host -Object "[Alert] Removal of Legacy LAPS is recommended."
         Write-Host -Object "[Alert] https://learn.microsoft.com/windows-server/identity/laps/laps-scenarios-migration`n"
     }
 
     try {
-        Write-Host -Object "Updating the active directory schema for LAPS."
+        # Attempt to update the Active Directory schema for LAPS
+        Write-Host -Object "Updating the Active Directory schema for LAPS."
 
+        # If Windows LAPS schema is not already present, update it
         if (!$WindowsLAPS) {
             Update-LapsADSchema -Confirm:$False -ErrorAction "Stop"
         } else {
-            Write-Host -Object "The LAPS active directory schema is already present."
+            Write-Host -Object "The LAPS Active Directory schema is already present."
         }
         Write-Host -Object "Update was successful."
     } catch {
+        # Handle errors during schema update
         Write-Host -Object "[Error] $($_.Exception.Message)"
-        Write-Host -Object "[Error] Failed to update the LAPS Schema."
+        Write-Host -Object "[Error] Failed to update the LAPS schema."
         Write-Host -Object "[Error] Is the account '$env:USERNAME' a member of the Schema Admins group and the Enterprise Admins group or the SYSTEM account?"
         exit 1
     }
 
     try {
-        Write-Host -Object "Retrieving the current AD Domain."
+        # Retrieve the current Active Directory domain
+        Write-Host -Object "Retrieving the current AD domain."
         $ADDomain = Get-ADDomain -ErrorAction "Stop" | Select-Object -ExpandProperty "DistinguishedName" -ErrorAction "Stop"
 
+        # Update permissions to allow computers to synchronize their LAPS passwords to their own AD objects
         Write-Host -Object "Allowing each computer in '$ADDomain' to synchronize (i.e., push) its LAPS password to its own computer object in Active Directory."
         Set-LapsADComputerSelfPermission -Identity $ADDomain -ErrorAction "Stop" | Out-Null
         Write-Host -Object "Successfully updated the permissions."
     } catch {
+        # Handle errors during permission update
         Write-Host -Object "[Error] $($_.Exception.Message)"
         Write-Host -Object "[Error] Failed to update the permissions."
         exit 1
     }
 
+    # Check if the "Windows LAPS" GPO already exists
     $WindowsLAPSGPO = Get-GPO -Name "Windows LAPS" -ErrorAction SilentlyContinue
     if ($WindowsLAPSGPO -and !$Force) {
+        # If the GPO exists and the Force flag is not set, display a message and exit
         Write-Host -Object "`nThe 'Windows LAPS' GPO is already present. Please use -Force to overwrite the existing GPO."
         $WindowsLAPSGPO
 
+        # Provide instructions for linking the GPO if not already linked
         if (!$LinkToRootOfDomain) {
-            Write-Host -Object "You may need to link it to your desired OU to finish the deploy."
+            Write-Host -Object "You may need to link it to your desired OU to finish the deployment."
         }
 
+        # Attempt to link the GPO to the root of the domain if requested
         if ($LinkToRootOfDomain) {
             try {
                 Write-Host -Object "`nLinking the new GPO to the root of the domain."
@@ -778,11 +829,13 @@ process {
         exit $ExitCode
     }
 
+    # If the GPO exists and the Force flag is set, overwrite it
     if ($WindowsLAPSGPO -and $Force) {
-        Write-Host -Object "`nThe 'Windows LAPS' GPO is already present. Overwriting it is as requested."
+        Write-Host -Object "`nThe 'Windows LAPS' GPO is already present. Overwriting it as requested."
     }
 
     try {
+        # Create the Group Policy file structure for the new GPO
         Write-Host -Object "`nCreating the Group Policy file structure at '$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}'."
         if (!(Test-Path -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}" -PathType "Container" -ErrorAction SilentlyContinue)) {
             New-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}" -ItemType "Directory" -ErrorAction Stop | Out-Null
@@ -794,6 +847,8 @@ process {
             New-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\Scripts\Shutdown" -ItemType "Directory" -ErrorAction Stop | Out-Null
             New-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\Scripts\Startup" -ItemType "Directory" -ErrorAction Stop | Out-Null
         }
+
+        # Create a comment file for the GPO
         $Comment = @"
 <?xml version='1.0' encoding='utf-8'?>
 <policyComments xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" revision="1.0" schemaVersion="1.0" xmlns="http://www.microsoft.com/GroupPolicy/CommentDefinitions">
@@ -809,15 +864,15 @@ process {
 </policyComments>
 "@
         $Comment | Out-File -FilePath "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\comment.cmtx" -Encoding "UTF8" -ErrorAction Stop
-
-
     } catch {
+        # Handle errors during file structure creation
         Write-Host -Object "[Error] $($_.Exception.Message)"
         Write-Host -Object "[Error] Failed to create the group policy backup at '$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}'."
         exit 1
     }
 
     try {
+        # Create the registry.pol content with LAPS settings
         $RegistryPOL = @"
 Computer
 SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\LAPS
@@ -827,7 +882,7 @@ DWORD:4
 Computer
 SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\LAPS
 PasswordLength
-DWORD:$DesiredPassLength[System.Net.Dns]::GetHostEntry($env:COMPUTERNA
+DWORD:$DesiredPassLength
 
 Computer
 SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\LAPS
@@ -859,17 +914,21 @@ SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\LAPS
 ADEncryptedPasswordHistorySize
 DWORD:3
 "@
+        # Write the registry.pol content to a temporary file
         $RegistryPOL | Out-File -FilePath "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registrypol.txt" -Encoding "UTF8" -ErrorAction Stop
     } catch {
+        # Handle errors during registry.pol file creation
         Write-Host -Object "[Error] $($_.Exception.Message)"
         Write-Host -Object "[Error] Failed to create registry.pol file at '$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registry.pol'."
         exit 1
     }
 
     try {
+        # Download the LGPO utility from the Microsoft Security Compliance Toolkit
         Write-Host -Object "Downloading the Local Group Policy Object Utility from the Microsoft Security Compliance Toolkit."
         $LGPOUtility = Invoke-Download -URL $LGPOUrl -Path "$WorkingDirectory\LGPO.zip" -Overwrite -ErrorAction Stop
 
+        # Extract the downloaded LGPO.zip file
         Write-Host -Object "Extracting LGPO.zip to '$WorkingDirectory'"
         $PreviousProgressPreference = $ProgressPreference
         $ProgressPreference = 'SilentlyContinue'
@@ -877,6 +936,7 @@ DWORD:3
         Expand-Archive -Path "$WorkingDirectory\LGPO.zip" -DestinationPath "$WorkingDirectory\LGPO" -Force -ErrorAction Stop
         $ProgressPreference = $PreviousProgressPreference
     } catch {
+        # Handle errors during LGPO utility download and extraction
         $ProgressPreference = $PreviousProgressPreference
         Write-Host -Object "[Error] $($_.Exception.Message)"
         Write-Host -Object "[Error] Failed to download and extract the Local Group Policy Object Utility."
@@ -884,13 +944,16 @@ DWORD:3
     }
 
     try {
+        # Remove the LGPO.zip file after extraction
         Remove-Item -Path "$WorkingDirectory\LGPO.zip" -Force -ErrorAction Stop
     } catch {
+        # Handle errors during LGPO.zip file removal
         Write-Host -Object "[Warning] $($_.Exception.Message)"
         Write-Host -Object "[Warning] Failed to remove '$WorkingDirectory\LGPO.zip'"
     }
 
     try {
+        # Convert the registrypol.txt file to a registry.pol file using LGPO.exe
         Write-Host -Object "Converting '$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registrypol.txt' to a .pol file."
         $LGPOArguments = @(
             "/r"
@@ -900,16 +963,19 @@ DWORD:3
         )
         Invoke-LegacyCMDUtility -FilePath "$WorkingDirectory\LGPO\LGPO_30\LGPO.exe" -ArgumentList $LGPOArguments -ErrorAction SilentlyContinue
 
+        # Verify the registry.pol file was created successfully
         if (!(Test-Path -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registry.pol" -ErrorAction SilentlyContinue)) {
-            throw (New-Object System.IO.FileNotFoundException("'$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registrypol.pol' was not found."))
+            throw (New-Object System.IO.FileNotFoundException("'$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registry.pol' was not found."))
         }
 
+        # Validate the content of the registry.pol file
         $RegistryPOLData = Get-Content -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registry.pol" -ErrorAction SilentlyContinue
 
         if ([string]::IsNullOrWhiteSpace(($RegistryPOLData | Out-String))) {
             throw (New-Object System.IO.IOException("'$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registrypol.txt' failed to convert."))
         }
     } catch {
+        # Handle errors during registrypol.txt to registry.pol conversion
         Write-Host -Object "[Error] $($_.Exception.Message)"
         Write-Host -Object "[Error] Failed to convert registrypol.txt to a registry.pol file."
         exit 1
@@ -917,8 +983,10 @@ DWORD:3
 
     if (Test-Path -Path "$WorkingDirectory\LGPO" -PathType "Container" -ErrorAction SilentlyContinue) {
         try {
+            # Remove the LGPO folder after conversion
             Remove-Item -Path "$WorkingDirectory\LGPO" -Recurse -Force -Confirm:$False -ErrorAction Stop
         } catch {
+            # Handle errors during LGPO folder removal
             Write-Host -Object "[Error] $($_.Exception.Message)"
             Write-Host -Object "[Error] Failed to remove '$WorkingDirectory\LGPO'."
             $ExitCode = 1
@@ -926,23 +994,28 @@ DWORD:3
     }
 
     try {
+        # Remove the temporary registrypol.txt file after conversion
         Remove-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registrypol.txt" -Force -ErrorAction Stop
     } catch {
+        # Log a warning if the file removal fails
         Write-Host -Object "[Warning] $($_.Exception.Message)"
-        Write-Host -Object "[Warning] Failed to remove '$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registrypol.txt'"
+        Write-Host -Object "[Warning] Failed to remove '$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registrypol.txt'."
     }
 
     try {
-        Write-Host -Object "Creating Backup and Backup Info xml at '$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}'"
+        # Create backup XML files for the GPO
+        Write-Host -Object "Creating Backup and Backup Info XML at '$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}'."
         $DomainSid = (Get-ADDomain -ErrorAction Stop).DomainSID.Value
         $NetBiosName = (Get-ADDomain -ErrorAction Stop).NetBIOSName
         $FQHostname = $([System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName)
         $DomainName = $(([System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain()).Name)
 
+        # Validate domain information
         if ([string]::IsNullOrWhiteSpace($DomainSID) -or [string]::IsNullOrWhiteSpace($NetBiosName) -or [string]::IsNullOrWhiteSpace($FQHostname) -or [string]::IsNullOrWhiteSpace($DomainName)) {
             throw (New-Object System.ArgumentNullException("Failed to fetch some of the required domain information."))
         }
 
+        # Generate the Backup.xml file
         $BackupXML = @"
 <?xml version="1.0" encoding="utf-8"?><!-- Copyright (c) Microsoft Corporation.  All rights reserved. --><GroupPolicyBackupScheme bkp:version="2.0" bkp:type="GroupPolicyBackupTemplate" xmlns:bkp="http://www.microsoft.com/GroupPolicy/GPOOperations" xmlns="http://www.microsoft.com/GroupPolicy/GPOOperations">
     <GroupPolicyObject><SecurityGroups><Group bkp:Source="FromDACL"><Sid><![CDATA[$DomainSid-519]]></Sid><SamAccountName><![CDATA[Enterprise Admins]]></SamAccountName><Type><![CDATA[UniversalGroup]]></Type><NetBIOSDomainName><![CDATA[$NetBiosName]]></NetBIOSDomainName><DnsDomainName><![CDATA[$DomainName]]></DnsDomainName><UPN><![CDATA[Enterprise Admins@$DomainName]]></UPN></Group><Group bkp:Source="FromDACL"><Sid><![CDATA[$DomainSid-512]]></Sid><SamAccountName><![CDATA[Domain Admins]]></SamAccountName><Type><![CDATA[GlobalGroup]]></Type><NetBIOSDomainName><![CDATA[$NetBiosName]]></NetBIOSDomainName><DnsDomainName><![CDATA[$DomainName]]></DnsDomainName><UPN><![CDATA[Domain Admins@$DomainName]]></UPN></Group></SecurityGroups><FilePaths/><GroupPolicyCoreSettings><ID><![CDATA[{7D34FF20-69C9-4D02-B681-1CBB956F3F25}]]></ID><Domain><![CDATA[$DomainName]]></Domain><SecurityDescriptor>01 00 04 9c 00 00 00 00 00 00 00 00 00 00 00 00 14 00 00 00 04 00 ec 00 08 00 00 00 05 02 28 00 00 01 00 00 01 00 00 00 8f fd ac ed b3 ff d1 11 b4 1d 00 a0 c9 68 f9 39 01 01 00 00 00 00 00 05 0b 00 00 00 00 00 24 00 ff 00 0f 00 01 05 00 00 00 00 00 05 15 00 00 00 7c 0d 70 3d 7e 37 fc fe f4 5b b0 83 00 02 00 00 00 02 24 00 ff 00 0f 00 01 05 00 00 00 00 00 05 15 00 00 00 7c 0d 70 3d 7e 37 fc fe f4 5b b0 83 00 02 00 00 00 02 24 00 ff 00 0f 00 01 05 00 00 00 00 00 05 15 00 00 00 7c 0d 70 3d 7e 37 fc fe f4 5b b0 83 07 02 00 00 00 02 14 00 94 00 02 00 01 01 00 00 00 00 00 05 09 00 00 00 00 02 14 00 94 00 02 00 01 01 00 00 00 00 00 05 0b 00 00 00 00 02 14 00 ff 00 0f 00 01 01 00 00 00 00 00 05 12 00 00 00 00 0a 14 00 ff 00 0f 00 01 01 00 00 00 00 00 03 00 00 00 00</SecurityDescriptor><DisplayName><![CDATA[Windows LAPS]]></DisplayName><Options><![CDATA[0]]></Options><UserVersionNumber><![CDATA[0]]></UserVersionNumber><MachineVersionNumber><![CDATA[393222]]></MachineVersionNumber><MachineExtensionGuids><![CDATA[[{35378EAC-683F-11D2-A89A-00C04FBBCFA2}{D02B1F72-3407-48AE-BA88-E8213C6761F1}]]]></MachineExtensionGuids><UserExtensionGuids/><WMIFilter/></GroupPolicyCoreSettings>
@@ -965,34 +1038,39 @@ DWORD:3
 "@
         $BackupXML | Out-File "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\Backup.xml" -Encoding "UTF8" -ErrorAction Stop
 
+        # Generate the bkupInfo.xml file
         $LastWriteTime = Get-ItemProperty -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\Backup.xml" -ErrorAction Stop | Select-Object -ExpandProperty "LastWriteTime" -ErrorAction Stop
-
         $BackupInfoXML = @"
 <BackupInst xmlns="http://www.microsoft.com/GroupPolicy/GPOOperations/Manifest"><GPOGuid><![CDATA[{7D34FF20-69C9-4D02-B681-1CBB956F3F25}]]></GPOGuid><GPODomain><![CDATA[$DomainName]]></GPODomain><GPODomainGuid><![CDATA[{2061ae04-eed7-43ea-a262-bf9bf9fe1e89}]]></GPODomainGuid><GPODomainController><![CDATA[$FQHostname]]></GPODomainController><BackupTime><![CDATA[$($LastWriteTime.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss"))]]></BackupTime><ID><![CDATA[{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}]]></ID><Comment><![CDATA[]]></Comment><GPODisplayName><![CDATA[Windows LAPS]]></GPODisplayName></BackupInst>
 "@
         $BackupInfoXML | Out-File "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\bkupInfo.xml" -Encoding "UTF8" -ErrorAction Stop
         Set-ItemProperty -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\bkupInfo.xml" -Name "Attributes" -Value ([System.IO.FileAttributes]::Hidden) -ErrorAction Stop
     } catch {
+        # Log an error if the backup XML creation fails
         Write-Host -Object "[Error] $($_.Exception.Message)"
-        Write-Host -Object "[Error] Failed to create the backup xml."
+        Write-Host -Object "[Error] Failed to create the backup XML."
         exit 1
     }
 
     try {
+        # Import the new GPO using the backup files
         Write-Host -Object "Attempting to import the new GPO."
         $NewGPO = Import-GPO -Path "$WorkingDirectory" -BackupGPOName "Windows LAPS" -TargetName "Windows LAPS" -CreateIfNeeded -ErrorAction Stop
         $NewGPO
         Write-Host -Object "The Windows LAPS GPO object has been imported."
     } catch {
+        # Log an error if the GPO import fails
         Write-Host -Object "[Error] $($_.Exception.Message)"
-        Write-Host -Object "[Error] Failed to import the gpo."
+        Write-Host -Object "[Error] Failed to import the GPO."
         exit 1
     }
 
+    # Clean up temporary files and directories
     if (Test-Path -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}" -PathType "Container" -ErrorAction SilentlyContinue) {
         try {
             Remove-Item -Path "$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}" -Recurse -Force -Confirm:$False -ErrorAction Stop
         } catch {
+            # Log an error if the directory removal fails
             Write-Host -Object "[Error] $($_.Exception.Message)"
             Write-Host -Object "[Error] Failed to remove '$WorkingDirectory\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}'."
             $ExitCode = 1
@@ -1003,16 +1081,19 @@ DWORD:3
         try {
             Remove-Item -Path "$WorkingDirectory\manifest.xml" -Force -Confirm:$False -ErrorAction Stop
         } catch {
+            # Log an error if the manifest.xml file removal fails
             Write-Host -Object "[Error] $($_.Exception.Message)"
             Write-Host -Object "[Error] Failed to remove '$WorkingDirectory\manifest.xml'."
             $ExitCode = 1
         }
     }
 
+    # Provide instructions for linking the GPO if not already linked
     if (!$LinkToRootOfDomain) {
-        Write-Host -Object "`nThe GPO object has been imported. Please link it to your desired OU to finish the deploy."
+        Write-Host -Object "`nThe GPO object has been imported. Please link it to your desired OU to finish the deployment."
     }
 
+    # Attempt to link the GPO to the root of the domain if requested
     if ($LinkToRootOfDomain) {
         try {
             Write-Host -Object "`nLinking the new GPO to the root of the domain."
@@ -1023,6 +1104,7 @@ DWORD:3
             try {
                 $NewGPO | New-GPLink -Target $DistinguishedName -LinkEnabled "Yes" -ErrorAction Stop
             } catch {
+                # Log an error if the GPO linking fails
                 Write-Host -Object "[Error] $($_.Exception.Message)"
                 Write-Host -Object "[Error] Failed to link the GPO. You may need to link it manually."
                 exit 1
