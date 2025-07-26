@@ -2,20 +2,72 @@
 
 <#
 .SYNOPSIS
-    Short Description
+    Deploys Windows LAPS and warns if Legacy LAPS is currently installed. Does not create the managed account.
 .DESCRIPTION
-    Long Description
+    Deploys Windows LAPS and warns if Legacy LAPS is currently installed. Does not create the managed account.
 
 .EXAMPLE
     -AccountToManage "testAdmin" -DesiredPassLength 14 -DesiredMaxPassAge 30 -LinkToRootOfDomain
 
-    ## EXAMPLE OUTPUT WITHOUT PARAMS ##
+    Verifying the domain functional level (DFL) is 2016 or higher.
+    Updating the Active Directory schema for LAPS.
+    Update was successful.
+    Retrieving the current AD domain.
+    Allowing each computer in 'DC=test,DC=lan' to synchronize (i.e., push) its LAPS password to its own computer object in Active Directory.
+    Successfully updated the permissions.
 
-.PARAMETER SomeParam
-    A brief explanation of the parameter.
+    Creating the Group Policy file structure at 'C:\Windows\TEMP\Windows-LAPS-Script\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}'.
+    Downloading the Local Group Policy Object Utility from the Microsoft Security Compliance Toolkit.
+    The URL provided was 'https://download.microsoft.com/download/8/5/c/85c25433-a1b0-4ffa-9429-7e023e7da8d8/LGPO.zip'.
+    Downloading the file.
+    Waiting for 12 seconds.
+    Download Attempt 1
+    Extracting LGPO.zip to 'C:\Windows\TEMP\Windows-LAPS-Script'
+    Converting 'C:\Windows\TEMP\Windows-LAPS-Script\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}\DomainSysvol\GPO\Machine\registrypol.txt' to a .pol file.
+    Creating Backup and Backup Info XML at 'C:\Windows\TEMP\Windows-LAPS-Script\{0B7D4FF6-4728-4D4D-8A11-EE2ABC897AE6}'.
+    Attempting to import the new GPO.
 
-.PARAMETER CustomFieldParam
-    A brief explanation of the parameter.
+
+    DisplayName      : Windows LAPS
+    DomainName       : test.lan
+    Owner            : NT AUTHORITY\SYSTEM
+    Id               : 53210984-fd75-463a-90eb-fa8819b6d496
+    GpoStatus        : AllSettingsEnabled
+    Description      :
+    CreationTime     : 7/25/2025 7:54:27 PM
+    ModificationTime : 7/25/2025 7:54:27 PM
+    UserVersion      : AD Version: 1, SysVol Version: 1
+    ComputerVersion  : AD Version: 1, SysVol Version: 1
+    WmiFilter        :
+
+    The Windows LAPS GPO object has been imported.
+
+    Linking the new GPO to the root of the domain.
+
+    DisplayName   : Windows LAPS
+    GpoId         : 53210984-fd75-463a-90eb-fa8819b6d496
+    Enabled       : True
+    Enforced      : False
+    Order         : 2
+    Target        : DC=test,DC=lan
+    GpoDomainName : test.lan
+
+    Successfully linked the new GPO.
+
+.PARAMETER AccountToManage
+    The name of the administrator account for which Windows LAPS should rotate the password.
+
+.PARAMETER DesiredPassLength
+    Specifies the length of the password that Windows LAPS should generate.
+
+.PARAMETER DesiredMaxPassAge
+    Specifies how often the password should be rotated.
+
+.PARAMETER LinkToRootOfDomain
+    Links the created GPO to the root of the domain.
+
+.PARAMETER Force
+    Overwrites the GPO if it already exists.
 
 .NOTES
     Minimum OS Architecture Supported: Windows Server 2019
@@ -815,9 +867,11 @@ process {
                 Write-Host -Object "`nLinking the new GPO to the root of the domain."
                 $DistinguishedName = (Get-ADDomain -ErrorAction Stop).DistinguishedName
                 $WindowsLAPSGPO | Set-GPLink -Target $DistinguishedName -LinkEnabled "Yes" -ErrorAction Stop
+                Write-Host -Object "Successfully linked the new GPO."
             } catch {
                 try {
                     $WindowsLAPSGPO | New-GPLink -Target $DistinguishedName -LinkEnabled "Yes" -ErrorAction Stop
+                    Write-Host -Object "Successfully linked the new GPO."
                 } catch {
                     Write-Host -Object "[Error] $($_.Exception.Message)"
                     Write-Host -Object "[Error] Failed to link the GPO. You may need to link it manually."
@@ -1103,6 +1157,7 @@ DWORD:3
         } catch {
             try {
                 $NewGPO | New-GPLink -Target $DistinguishedName -LinkEnabled "Yes" -ErrorAction Stop
+                Write-Host -Object "Successfully linked the new GPO."
             } catch {
                 # Log an error if the GPO linking fails
                 Write-Host -Object "[Error] $($_.Exception.Message)"
